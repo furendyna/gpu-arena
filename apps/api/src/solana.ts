@@ -8,6 +8,7 @@ import {
   getOrCreateAssociatedTokenAccount,
   getMint,
   transfer,
+  burn,
 } from "@solana/spl-token";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
@@ -97,5 +98,37 @@ export async function payoutToWinner(
     treasury,
     baseAmount,
   );
+  return { simulated: false, signature };
+}
+
+/**
+ * Permanently burn `uiAmount` of the prize token from the treasury (25% of the
+ * prize). Guarded by ENABLE_REAL_PAYOUTS like payouts; otherwise simulated.
+ */
+export async function burnPrize(uiAmount: number): Promise<PayoutResult> {
+  if (uiAmount <= 0) return { simulated: true, reason: "nothing to burn" };
+
+  const enabled = process.env.ENABLE_REAL_PAYOUTS === "true";
+  const mintStr = process.env.PRIZE_TOKEN_MINT;
+  const treasury = getTreasury();
+
+  if (!enabled || !mintStr || !treasury) {
+    return {
+      simulated: true,
+      reason: !enabled
+        ? "ENABLE_REAL_PAYOUTS is false"
+        : !mintStr
+          ? "PRIZE_TOKEN_MINT not set"
+          : "TREASURY_SECRET_KEY not set",
+    };
+  }
+
+  const connection = getConnection();
+  const mint = new PublicKey(mintStr);
+  const mintInfo = await getMint(connection, mint);
+  const baseAmount = BigInt(Math.round(uiAmount * 10 ** mintInfo.decimals));
+
+  const treasuryAta = await getOrCreateAssociatedTokenAccount(connection, treasury, mint, treasury.publicKey);
+  const signature = await burn(connection, treasury, treasuryAta.address, mint, treasury, baseAmount);
   return { simulated: false, signature };
 }

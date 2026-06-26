@@ -3,8 +3,8 @@ import cors from "cors";
 import type { Bounty, Tier } from "@gpu-arena/shared";
 import { TIER_LABELS } from "@gpu-arena/shared";
 import { seed, store } from "./store.js";
-import { judge } from "./judge.js";
-import { payoutToWinner, verifyWalletSignature } from "./solana.js";
+import { verifyWalletSignature } from "./solana.js";
+import { activeBountyIsAcceptingSubmissions, getArenaState, startArena } from "./orchestrator.js";
 
 const app = express();
 app.use(cors());
@@ -25,6 +25,11 @@ app.get("/api/pools", (_req, res) => {
     competitors: competitors.filter((c) => c.tier === tier),
   }));
   res.json({ pools });
+});
+
+/** Single live snapshot the arena UI polls: active battle, queue, pools, stats. */
+app.get("/api/arena/state", (_req, res) => {
+  res.json(getArenaState());
 });
 
 /**
@@ -81,67 +86,39 @@ app.get("/api/bounties/:id", (req, res) => {
   res.json({ bounty, competitors, submissions: store.submissionsFor(bounty.id) });
 });
 
-/** A competitor submits an answer (called by the GPU agent). */
+/**
+ * A competitor submits an answer (called by the GPU agent). Only accepted while
+ * the bounty is the active battle and inside its submission window — the
+ * orchestrator drives judging/payout automatically afterwards.
+ */
 app.post("/api/bounties/:id/submit", (req, res) => {
   const bounty = store.bounties.get(req.params.id);
   if (!bounty) return res.status(404).json({ error: "bounty not found" });
+  if (!activeBountyIsAcceptingSubmissions(bounty.id)) {
+    return res.status(409).json({ error: "bounty is not accepting submissions right now" });
+  }
   const { wallet, answer, latencyMs } = req.body ?? {};
   const competitor = wallet ? store.competitorByWallet(wallet) : undefined;
   if (!competitor) return res.status(401).json({ error: "competitor not registered" });
   if (competitor.tier !== bounty.tier) {
     return res.status(403).json({ error: `competitor is Tier ${competitor.tier}, bounty is Tier ${bounty.tier}` });
   }
+  // One submission per competitor per bounty.
+  const existing = store.submissionsFor(bounty.id).find((s) => s.competitorId === competitor.id);
+  if (existing) return res.json({ submission: existing });
+
   const submission = store.addSubmission({
     bountyId: bounty.id,
     competitorId: competitor.id,
     answer: String(answer ?? ""),
     latencyMs: Number(latencyMs ?? 0),
   });
-  bounty.status = "battling";
   res.json({ submission });
-});
-
-/** Close the battle, judge blind, pick winner, pay out. */
-app.post("/api/bounties/:id/judge", async (req, res) => {
-  const bounty = store.bounties.get(req.params.id);
-  if (!bounty) return res.status(404).json({ error: "bounty not found" });
-  const submissions = store.submissionsFor(bounty.id);
-  if (submissions.length === 0) return res.status(400).json({ error: "no submissions" });
-
-  bounty.status = "judging";
-  const result = await judge(bounty.prompt, submissions);
-
-  for (const s of submissions) {
-    const j = result.scores[s.id];
-    if (j) {
-      s.score = j.score;
-      s.rationale = j.rationale;
-    }
-  }
-
-  const winnerSub = store.submissions.get(result.winnerSubmissionId)!;
-  const winner = store.competitors.get(winnerSub.competitorId)!;
-  bounty.winnerSubmissionId = winnerSub.id;
-
-  const payout = await payoutToWinner(winner.wallet, bounty.prizeAmount);
-  if (!payout.simulated && payout.signature) {
-    bounty.payoutTxSig = payout.signature;
-  }
-  bounty.status = "settled";
-  winner.points += Math.round(bounty.prizeAmount / 10);
-  winner.wins += 1;
-
-  res.json({
-    bounty,
-    winner,
-    winnerSubmission: winnerSub,
-    submissions,
-    payout,
-  });
 });
 
 const port = Number(process.env.PORT || 4000);
 app.listen(port, () => {
   console.log(`[gpu-arena] API listening on http://localhost:${port}`);
   console.log(`[gpu-arena] cluster=${process.env.SOLANA_CLUSTER || "mainnet-beta"} realPayouts=${process.env.ENABLE_REAL_PAYOUTS === "true"}`);
+  startArena();
 });

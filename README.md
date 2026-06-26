@@ -4,6 +4,12 @@
 
 Because the strongest card would otherwise always win, GPUs are split into **tiers** and judged on *answer quality*, not raw power.
 
+## How battles run
+
+GPUs just connect and wait — **nothing battles until someone posts a bounty**. Bounties are processed by an automatic orchestrator **one at a time, first-in-first-out**: a submission window opens for the bounty's tier, every GPU answers, the blind judge scores, and the prize settles. No one can manually trigger a battle.
+
+**Prize split:** the winner receives **75%**; **25% of every prize is burned** (tracked arena-wide). Tunable timings live in `apps/api/.env` (`BATTLE_WINDOW_MS`, `JUDGE_PAUSE_MS`, `REVEAL_MS`).
+
 | Tier | Pool | Hardware |
 | --- | --- | --- |
 | **Tier 1** | Pool Alpha | NVIDIA RTX 20-series & older (GTX 16/10), AMD RX 5000 & older |

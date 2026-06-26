@@ -1,4 +1,4 @@
-import type { Bounty, Competitor, Submission } from "@gpu-arena/shared";
+import type { ArenaStats, Bounty, Competitor, Submission } from "@gpu-arena/shared";
 import { classifyGpu } from "@gpu-arena/shared";
 import { randomUUID } from "node:crypto";
 
@@ -7,6 +7,7 @@ class Store {
   competitors = new Map<string, Competitor>();
   bounties = new Map<string, Bounty>();
   submissions = new Map<string, Submission>();
+  stats: ArenaStats = { totalBurned: 0, totalPaidOut: 0, battlesCompleted: 0, activeGpus: 0 };
 
   upsertCompetitor(input: {
     wallet: string;
@@ -54,6 +55,18 @@ class Store {
   submissionsFor(bountyId: string): Submission[] {
     return [...this.submissions.values()].filter((s) => s.bountyId === bountyId);
   }
+
+  /** Open bounties waiting to battle, oldest first (FIFO queue order). */
+  queuedBounties(): Bounty[] {
+    return [...this.bounties.values()]
+      .filter((b) => b.status === "open")
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /** The next bounty that should battle, or undefined if the queue is empty. */
+  nextQueued(): Bounty | undefined {
+    return this.queuedBounties()[0];
+  }
 }
 
 export const store = new Store();
@@ -69,15 +82,6 @@ export function seed() {
   for (const [handle, wallet, rawName, mem] of seedComps) {
     store.upsertCompetitor({ handle, wallet, rawName, memoryMb: mem });
   }
-  store.createBounty({
-    creatorWallet: "ArenaMaster",
-    title: "What are the most promising directions for AI in the next 5 years?",
-    prompt:
-      "Give a concise, well-structured take on the most promising directions for AI over the next 5 years.",
-    category: "Technology",
-    tier: 2,
-    prizeAmount: 1000,
-    prizeMint: "So111token",
-    closesAt: Date.now() + 1000 * 60 * 60 * 3,
-  });
+  store.stats.activeGpus = store.competitors.size;
+  // No seeded bounty: the arena stays idle until someone creates one.
 }

@@ -6,25 +6,28 @@ const config: Config = {
     extend: {
       colors: {
         arena: {
-          bg: "#070612",
-          panel: "#0d0b22",
-          panel2: "#13102e",
-          tier1: "#22d3ee",
-          tier1b: "#0ea5e9",
-          tier2: "#c026d3",
-          tier2b: "#a21caf",
-          sol: "#14f195",
-          solb: "#9945ff",
-          gold: "#fbbf24",
+          bg: "#0a0806",
+          panel: "#13100c",
+          panel2: "#1a1510",
+          // Tier 1 = subdued amber, Tier 2 = the hero orange.
+          tier1: "#f59e0b",
+          tier1b: "#b45309",
+          tier2: "#ff751f",
+          tier2b: "#c2410c",
+          // Brand accent (prize, CTA, judging) — the requested orange.
+          sol: "#ff751f",
+          solb: "#ffa45c",
+          gold: "#ffb84d",
         },
       },
       fontFamily: {
         display: ["var(--font-display)", "system-ui", "sans-serif"],
       },
       boxShadow: {
-        "neon-cyan": "0 0 20px rgba(34,211,238,0.35), inset 0 0 12px rgba(34,211,238,0.15)",
-        "neon-magenta": "0 0 20px rgba(192,38,211,0.35), inset 0 0 12px rgba(192,38,211,0.15)",
-        "neon-gold": "0 0 30px rgba(251,191,36,0.55)",
+        // names kept for stability; recolored to the warm/orange theme.
+        "neon-cyan": "0 0 20px rgba(245,158,11,0.30), inset 0 0 12px rgba(245,158,11,0.12)",
+        "neon-magenta": "0 0 22px rgba(255,117,31,0.40), inset 0 0 12px rgba(255,117,31,0.16)",
+        "neon-gold": "0 0 30px rgba(255,184,77,0.6)",
       },
       keyframes: {
         float: {

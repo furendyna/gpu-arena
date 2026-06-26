@@ -48,10 +48,16 @@ export interface Bounty {
   /** Unix ms when battle closes for submissions. */
   closesAt: number;
   winnerSubmissionId?: string;
+  /** Amount actually paid to the winner (prize minus burn). */
+  winnerPayout?: number;
+  /** Amount burned from this bounty (25% of prize). */
+  burnedAmount?: number;
   /** Treasury escrow tx signature when funded. */
   escrowTxSig?: string;
   /** Payout tx signature when settled. */
   payoutTxSig?: string;
+  /** Burn tx signature when settled. */
+  burnTxSig?: string;
 }
 
 /** One GPU's answer to a bounty. */
@@ -75,4 +81,30 @@ export interface Battle {
   bounty: Bounty;
   competitors: Competitor[];
   submissions: Submission[];
+}
+
+/** Fraction of every prize that is burned (the rest goes to the winner). */
+export const BURN_RATE = 0.25;
+
+/** Aggregate, arena-wide counters. */
+export interface ArenaStats {
+  totalBurned: number;
+  totalPaidOut: number;
+  battlesCompleted: number;
+  activeGpus: number;
+}
+
+/** Phase of the currently-featured battle. */
+export type ArenaPhase = "idle" | "battling" | "judging" | "reveal";
+
+/** Everything the arena UI needs in one poll. */
+export interface ArenaState {
+  phase: ArenaPhase;
+  /** The battle being shown (battling/judging/reveal), or null when idle. */
+  active: Battle | null;
+  /** Bounties waiting their turn, in the order they'll run (FIFO). */
+  queue: Bounty[];
+  /** Registered GPUs grouped by tier. */
+  pools: Array<{ tier: Tier; label: string; competitors: Competitor[] }>;
+  stats: ArenaStats;
 }

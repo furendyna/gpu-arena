@@ -1,182 +1,206 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { Competitor, Tier } from "@gpu-arena/shared";
-import { TIER_LABELS } from "@gpu-arena/shared";
-import { ANSWER_SNIPPETS, COMPETITORS, SAMPLE_BOUNTY } from "@/lib/mock";
+import type { ArenaState, Bounty, Competitor, Submission, Tier } from "@gpu-arena/shared";
+import { BURN_RATE, TIER_LABELS } from "@gpu-arena/shared";
+import { getArenaState } from "@/lib/api";
+import { GITHUB_URL, TWITTER_URL } from "@/lib/config";
 import { GpuCard } from "./GpuCard";
 import { JudgingCrystal } from "./JudgingCrystal";
 import { TokenConfetti } from "./TokenConfetti";
+import { SocialLinks } from "./SocialLinks";
+import { CreateBountyModal } from "./CreateBountyModal";
+import { ConnectGpuModal } from "./ConnectGpuModal";
 
-type Phase = "idle" | "battling" | "judging" | "result";
+const POLL_MS = 1200;
 
-// Pre-baked target scores. NOTE: in each tier the winner is deliberately NOT the
-// strongest GPU — best answer wins, not the most powerful card.
-const TARGET_SCORES: Record<string, number> = {
-  "t1-a": 88, // RTX 3060  -> winner over the 2080 Ti
-  "t1-b": 84,
-  "t1-c": 76,
-  "t1-d": 80,
-  "t2-c": 94, // RTX 4080 Super -> winner over the 4090
-  "t2-a": 86,
-  "t2-b": 81,
-  "t2-d": 79,
-};
+function useArenaState() {
+  const [state, setState] = useState<ArenaState | null>(null);
+  const [offline, setOffline] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const s = await getArenaState();
+        if (!alive) return;
+        setState(s);
+        setOffline(false);
+      } catch {
+        if (alive) setOffline(true);
+      } finally {
+        if (alive) timer.current = setTimeout(tick, POLL_MS);
+      }
+    };
+    tick();
+    return () => {
+      alive = false;
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+
+  return { state, offline };
+}
 
 export function Arena() {
-  const [tier, setTier] = useState<Tier>(2);
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [streams, setStreams] = useState<Record<string, string>>({});
-  const [scores, setScores] = useState<Record<string, number>>({});
-  const [winnerId, setWinnerId] = useState<string | null>(null);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const { state, offline } = useArenaState();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
 
-  const roster = useMemo(() => COMPETITORS.filter((c) => c.tier === tier), [tier]);
-  const tier1 = useMemo(() => COMPETITORS.filter((c) => c.tier === 1), []);
-  const tier2 = useMemo(() => COMPETITORS.filter((c) => c.tier === 2), []);
+  const phase = state?.phase ?? "idle";
+  const active = state?.active ?? null;
+  const activeTier = active?.bounty.tier ?? null;
 
-  const clearTimers = () => {
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-  };
-  useEffect(() => () => clearTimers(), []);
+  const pools = state?.pools ?? [];
+  const tier1 = pools.find((p) => p.tier === 1)?.competitors ?? [];
+  const tier2 = pools.find((p) => p.tier === 2)?.competitors ?? [];
 
-  const startBattle = useCallback(() => {
-    clearTimers();
-    setPhase("battling");
-    setStreams({});
-    setScores({});
-    setWinnerId(null);
+  // submission lookups for the active battle
+  const subByComp = useMemo(() => {
+    const m = new Map<string, Submission>();
+    active?.submissions.forEach((s) => m.set(s.competitorId, s));
+    return m;
+  }, [active]);
 
-    // 1) Stream each competitor's answer (typewriter).
-    const STREAM_MS = 2600;
-    roster.forEach((c) => {
-      const full = ANSWER_SNIPPETS[c.id] ?? "";
-      const steps = Math.max(full.length, 1);
-      for (let i = 1; i <= steps; i++) {
-        const t = setTimeout(() => {
-          setStreams((prev) => ({ ...prev, [c.id]: full.slice(0, i) }));
-        }, (STREAM_MS / steps) * i + Math.random() * 120);
-        timers.current.push(t);
-      }
-    });
+  const winnerCompId = useMemo(() => {
+    if (!active?.bounty.winnerSubmissionId) return null;
+    return active.submissions.find((s) => s.id === active.bounty.winnerSubmissionId)?.competitorId ?? null;
+  }, [active]);
 
-    // 2) Judging phase.
-    timers.current.push(
-      setTimeout(() => {
-        setPhase("judging");
-        const JUDGE_MS = 1600;
-        const ticks = 24;
-        for (let k = 1; k <= ticks; k++) {
-          const t = setTimeout(() => {
-            setScores(() => {
-              const next: Record<string, number> = {};
-              roster.forEach((c) => {
-                next[c.id] = (TARGET_SCORES[c.id] ?? 70) * (k / ticks);
-              });
-              return next;
-            });
-          }, (JUDGE_MS / ticks) * k);
-          timers.current.push(t);
-        }
-      }, STREAM_MS + 500),
-    );
-
-    // 3) Result + winner reveal.
-    timers.current.push(
-      setTimeout(() => {
-        const winner = [...roster].sort(
-          (a, b) => (TARGET_SCORES[b.id] ?? 0) - (TARGET_SCORES[a.id] ?? 0),
-        )[0];
-        setWinnerId(winner.id);
-        setPhase("result");
-      }, STREAM_MS + 500 + 1900),
-    );
-  }, [roster]);
-
-  const accent = tier === 1 ? "text-arena-tier1" : "text-arena-tier2";
+  const showScores = phase === "judging" || phase === "reveal";
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 pb-16 pt-6">
-      <Header onCreate={startBattle} phase={phase} />
+      <CreateBountyModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      <ConnectGpuModal open={connectOpen} onClose={() => setConnectOpen(false)} />
+
+      <Header
+        onCreateBounty={() => setCreateOpen(true)}
+        onConnect={() => setConnectOpen(true)}
+        active={active}
+        queue={state?.queue ?? []}
+        offline={offline}
+      />
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[300px_1fr_300px]">
         <PoolColumn
           title={TIER_LABELS[1]}
           tier={1}
           competitors={tier1}
-          activeTier={tier}
+          activeTier={activeTier}
           phase={phase}
-          scores={scores}
-          winnerId={winnerId}
-          onSelect={() => phase === "idle" && setTier(1)}
+          subByComp={subByComp}
+          showScores={showScores}
+          winnerCompId={winnerCompId}
         />
 
         <BattleStage
-          tier={tier}
           phase={phase}
-          roster={roster}
-          streams={streams}
-          winnerId={winnerId}
-          onStart={startBattle}
+          active={active}
+          subByComp={subByComp}
+          winnerCompId={winnerCompId}
+          queueLen={state?.queue.length ?? 0}
+          onCreateBounty={() => setCreateOpen(true)}
+          onConnect={() => setConnectOpen(true)}
         />
 
         <PoolColumn
           title={TIER_LABELS[2]}
           tier={2}
           competitors={tier2}
-          activeTier={tier}
+          activeTier={activeTier}
           phase={phase}
-          scores={scores}
-          winnerId={winnerId}
-          onSelect={() => phase === "idle" && setTier(2)}
+          subByComp={subByComp}
+          showScores={showScores}
+          winnerCompId={winnerCompId}
         />
       </div>
 
-      <Scoreboard roster={roster} scores={scores} accent={accent} />
-      <StatBar />
+      <BattleScoreboard active={active} subByComp={subByComp} showScores={showScores} pools={pools} />
+      <QueueStrip queue={state?.queue ?? []} />
+      <StatBar stats={state?.stats} />
+      <HowItWorks onCreateBounty={() => setCreateOpen(true)} onConnect={() => setConnectOpen(true)} />
+      <Footer />
     </div>
   );
 }
 
 /* ----------------------------- Header ----------------------------- */
 
-function Header({ onCreate, phase }: { onCreate: () => void; phase: Phase }) {
+function Header({
+  onCreateBounty,
+  onConnect,
+  active,
+  queue,
+  offline,
+}: {
+  onCreateBounty: () => void;
+  onConnect: () => void;
+  active: ArenaState["active"];
+  queue: Bounty[];
+  offline: boolean;
+}) {
+  const shown = active?.bounty ?? queue[0] ?? null;
+  const label = active ? "Active Battle" : queue.length ? "Next Up" : "No active battle";
   return (
-    <header className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
-      <div className="flex items-center gap-3">
-        <div className="clip-card grid h-14 w-14 place-items-center bg-gradient-to-br from-arena-tier1 to-arena-tier2 font-display text-2xl font-black text-black">
-          GA
-        </div>
-        <div>
-          <div className="font-display text-2xl font-black leading-none tracking-wide">
-            GPU<span className="text-arena-tier2"> ARENA</span>
+    <header className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="GPU Arena" className="h-14 w-14 object-contain" />
+          <div>
+            <div className="font-display text-2xl font-black leading-none tracking-wide">
+              GPU<span className="text-arena-tier2"> ARENA</span>
+            </div>
+            <div className="text-[11px] tracking-[0.25em] text-slate-400">GPUS BATTLE · BEST ANSWER WINS</div>
           </div>
-          <div className="text-[11px] tracking-[0.25em] text-slate-400">GPUS BATTLE · BEST ANSWER WINS</div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onConnect}
+            className="clip-card border border-arena-tier2/40 px-4 py-2.5 font-display text-sm font-bold text-arena-tier2 transition hover:bg-arena-tier2/10"
+          >
+            ⚡ Connect GPU
+          </button>
+          <button
+            onClick={onCreateBounty}
+            className="clip-card bg-gradient-to-r from-arena-sol to-arena-solb px-4 py-2.5 font-display text-sm font-bold text-black transition-transform hover:scale-[1.02] active:scale-95"
+          >
+            + Create Bounty
+          </button>
+          <SocialLinks />
         </div>
       </div>
 
-      <div className="clip-card glass flex flex-1 items-center gap-4 px-5 py-3">
+      <div className="clip-card glass flex flex-col gap-4 px-5 py-3 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-[0.25em] text-arena-sol">Active Bounty</div>
-          <div className="truncate text-sm font-semibold text-slate-100">{SAMPLE_BOUNTY.title}</div>
-          <div className="text-[11px] text-slate-400">Category: {SAMPLE_BOUNTY.category}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400">Prize Pool</div>
-          <div className="font-display text-2xl font-black text-arena-sol">
-            {SAMPLE_BOUNTY.prizeAmount.toLocaleString()} <span className="text-sm">SOL</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-[0.25em] text-arena-sol">{label}</span>
+            {offline && <span className="text-[10px] text-red-400">· API offline (run npm run dev:api)</span>}
+          </div>
+          <div className="truncate text-sm font-semibold text-slate-100">
+            {shown ? shown.title : "Create a bounty to start the next battle"}
+          </div>
+          <div className="text-[11px] text-slate-400">
+            {shown ? `Tier ${shown.tier} · ${shown.category}` : "GPUs sit idle until a bounty is posted"}
           </div>
         </div>
+        {shown && (
+          <div className="text-right">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400">Prize Pool</div>
+            <div className="font-display text-2xl font-black text-arena-sol">
+              {shown.prizeAmount.toLocaleString()} <span className="text-sm">$ARENA</span>
+            </div>
+            <div className="text-[10px] text-arena-gold">
+              {(shown.prizeAmount * (1 - BURN_RATE)).toLocaleString()} to winner ·{" "}
+              {(shown.prizeAmount * BURN_RATE).toLocaleString()} burned
+            </div>
+          </div>
+        )}
       </div>
-
-      <button
-        onClick={onCreate}
-        className="clip-card group relative overflow-hidden bg-gradient-to-r from-arena-sol to-arena-solb px-6 py-3 font-display text-sm font-bold text-black transition-transform hover:scale-[1.02] active:scale-95"
-      >
-        {phase === "idle" ? "⚔ START BATTLE" : "↻ REMATCH"}
-      </button>
     </header>
   );
 }
@@ -189,70 +213,73 @@ function PoolColumn({
   competitors,
   activeTier,
   phase,
-  scores,
-  winnerId,
-  onSelect,
+  subByComp,
+  showScores,
+  winnerCompId,
 }: {
   title: string;
   tier: Tier;
   competitors: Competitor[];
-  activeTier: Tier;
-  phase: Phase;
-  scores: Record<string, number>;
-  winnerId: string | null;
-  onSelect: () => void;
+  activeTier: Tier | null;
+  phase: ArenaState["phase"];
+  subByComp: Map<string, Submission>;
+  showScores: boolean;
+  winnerCompId: string | null;
 }) {
   const isActive = activeTier === tier;
-  const showScores = phase === "judging" || phase === "result";
   const accent = tier === 1 ? "text-arena-tier1" : "text-arena-tier2";
+  const ranked = [...competitors].sort((a, b) => b.points - a.points);
   return (
-    <button
-      onClick={onSelect}
-      className={`clip-card glass flex flex-col gap-2 p-3 text-left transition-opacity ${
-        isActive ? "opacity-100" : "opacity-60 hover:opacity-90"
-      }`}
-    >
+    <div className="clip-card glass flex flex-col gap-2 p-3">
       <div className="flex items-center justify-between px-1">
         <span className={`font-display text-sm font-bold tracking-wide ${accent}`}>{title}</span>
         <span className="text-[10px] text-slate-500">{competitors.length} GPUs</span>
       </div>
-      {competitors.map((c, i) => (
+      {ranked.length === 0 && (
+        <div className="rounded-md border border-dashed border-white/10 p-4 text-center text-[11px] text-slate-500">
+          No GPUs yet — connect one to fill this pool.
+        </div>
+      )}
+      {ranked.map((c, i) => (
         <GpuCard
           key={c.id}
           competitor={c}
           rank={i + 1}
-          score={isActive && showScores ? scores[c.id] : undefined}
+          score={isActive && showScores ? subByComp.get(c.id)?.score : undefined}
           active={isActive && phase === "battling"}
-          winner={winnerId === c.id}
+          winner={winnerCompId === c.id}
         />
       ))}
-    </button>
+    </div>
   );
 }
 
 /* --------------------------- Battle Stage --------------------------- */
 
 function BattleStage({
-  tier,
   phase,
-  roster,
-  streams,
-  winnerId,
-  onStart,
+  active,
+  subByComp,
+  winnerCompId,
+  queueLen,
+  onCreateBounty,
+  onConnect,
 }: {
-  tier: Tier;
-  phase: Phase;
-  roster: Competitor[];
-  streams: Record<string, string>;
-  winnerId: string | null;
-  onStart: () => void;
+  phase: ArenaState["phase"];
+  active: ArenaState["active"];
+  subByComp: Map<string, Submission>;
+  winnerCompId: string | null;
+  queueLen: number;
+  onCreateBounty: () => void;
+  onConnect: () => void;
 }) {
-  const winner = roster.find((c) => c.id === winnerId);
-  const beam = tier === 1 ? "#22d3ee" : "#c026d3";
+  const tier = active?.bounty.tier ?? 2;
+  const beam = tier === 1 ? "#f59e0b" : "#ff751f";
+  const winner = active?.competitors.find((c) => c.id === winnerCompId) ?? null;
+  const winnerSub = winnerCompId ? subByComp.get(winnerCompId) : undefined;
 
   return (
     <div className="clip-card glass relative grid min-h-[460px] place-items-center overflow-hidden p-6">
-      {/* arena rings */}
       <div className="pointer-events-none absolute inset-0 grid place-items-center opacity-40">
         <div className="h-[420px] w-[420px] animate-spinSlow rounded-full border border-white/10" />
         <div className="absolute h-[300px] w-[300px] rounded-full border border-white/10" />
@@ -260,75 +287,96 @@ function BattleStage({
       </div>
 
       <AnimatePresence mode="wait">
-        {phase === "result" && winner ? (
+        {phase === "reveal" && winner ? (
           <motion.div
             key="winner"
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
             className="relative z-10 text-center"
           >
             <TokenConfetti />
-            {/* spotlight */}
             <div
               className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[260px] -translate-x-1/2 -translate-y-10"
               style={{
-                background: "linear-gradient(to bottom, rgba(251,191,36,0.35), transparent 70%)",
+                background: "linear-gradient(to bottom, rgba(255,184,77,0.4), transparent 70%)",
                 clipPath: "polygon(42% 0, 58% 0, 100% 100%, 0 100%)",
               }}
             />
             <div className="font-display text-xs tracking-[0.4em] text-arena-gold">WINNER</div>
-            <div className="mt-2 font-display text-3xl font-black text-arena-gold drop-shadow">
-              {winner.gpu.model}
-            </div>
+            <div className="mt-2 font-display text-3xl font-black text-arena-gold drop-shadow">{winner.gpu.model}</div>
             <div className="text-sm text-slate-300">@{winner.handle}</div>
-            <div className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-slate-200">
-              “{streams[winner.id]}”
+            {winnerSub && (
+              <div className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-slate-200">“{winnerSub.answer}”</div>
+            )}
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-sm">
+              <span className="rounded-full bg-arena-sol/15 px-4 py-1.5 font-semibold text-arena-sol">
+                +{(active?.bounty.winnerPayout ?? 0).toLocaleString()} $ARENA to winner
+              </span>
+              <span className="rounded-full bg-orange-500/10 px-4 py-1.5 font-semibold text-orange-400">
+                🔥 {(active?.bounty.burnedAmount ?? 0).toLocaleString()} burned (25%)
+              </span>
             </div>
-            <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-arena-sol/15 px-4 py-1.5 text-sm font-semibold text-arena-sol">
-              +{SAMPLE_BOUNTY.prizeAmount.toLocaleString()} SOL paid out
+            <div className="mt-1 text-[11px] text-slate-500">Best answer won — not the most powerful GPU.</div>
+          </motion.div>
+        ) : phase === "idle" || !active ? (
+          <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="relative z-10 grid place-items-center text-center">
+            <JudgingCrystal active={false} />
+            <div className="mt-6 max-w-sm text-sm text-slate-400">
+              {queueLen > 0
+                ? `${queueLen} bounty${queueLen > 1 ? "ies" : "y"} queued — the next battle starts automatically.`
+                : "The arena is idle. GPUs are waiting — post a bounty to trigger a battle."}
             </div>
-            <div className="mt-1 text-[11px] text-slate-500">
-              Best answer won — not the most powerful GPU.
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={onConnect}
+                className="rounded-full border border-arena-tier2/40 px-4 py-2 text-xs font-bold text-arena-tier2 hover:bg-arena-tier2/10"
+              >
+                ⚡ Connect GPU
+              </button>
+              <button
+                onClick={onCreateBounty}
+                className="rounded-full bg-gradient-to-r from-arena-sol to-arena-solb px-4 py-2 text-xs font-bold text-black"
+              >
+                + Create Bounty
+              </button>
             </div>
           </motion.div>
         ) : (
-          <motion.div
-            key="stage"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="relative z-10 grid w-full place-items-center"
-          >
-            <JudgingCrystal active={phase === "battling" || phase === "judging"} />
-
-            {phase === "idle" && (
-              <button
-                onClick={onStart}
-                className="mt-8 rounded-full border border-white/15 bg-white/5 px-5 py-2 text-sm text-slate-200 transition hover:border-arena-sol/60 hover:text-arena-sol"
-              >
-                Click to run a battle in {tier === 1 ? "Tier 1" : "Tier 2"}
-              </button>
-            )}
-
-            {(phase === "battling" || phase === "judging") && (
-              <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
-                {roster.map((c) => (
-                  <div
+          <motion.div key="battle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="relative z-10 grid w-full place-items-center">
+            <JudgingCrystal active />
+            <div className="mt-6 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+              {active.competitors.map((c) => {
+                const sub = subByComp.get(c.id);
+                return (
+                  <motion.div
                     key={c.id}
+                    layout
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
                     className="clip-card glass relative min-h-[64px] px-3 py-2 text-[11px] leading-snug text-slate-300"
                     style={{ borderColor: `${beam}55` }}
                   >
-                    <div className="mb-1 text-[10px] font-semibold" style={{ color: beam }}>
-                      {c.gpu.model}
+                    <div className="mb-1 flex items-center justify-between text-[10px] font-semibold" style={{ color: beam }}>
+                      <span>{c.gpu.model}</span>
+                      {phase === "judging" && sub?.score !== undefined && (
+                        <span className="text-arena-gold">{Math.round(sub.score)}</span>
+                      )}
                     </div>
-                    {streams[c.id] ?? ""}
-                    {phase === "battling" && (
-                      <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulseGlow bg-current align-middle" />
+                    {sub ? (
+                      sub.answer
+                    ) : (
+                      <span className="text-slate-500">
+                        computing<span className="animate-pulseGlow">…</span>
+                      </span>
                     )}
-                  </div>
-                ))}
-              </div>
-            )}
+                  </motion.div>
+                );
+              })}
+            </div>
+            <div className="mt-4 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+              {phase === "battling" ? "Collecting answers…" : "Judging blind…"}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -338,55 +386,169 @@ function BattleStage({
 
 /* --------------------------- Scoreboard --------------------------- */
 
-function Scoreboard({
-  roster,
-  scores,
-  accent,
+function BattleScoreboard({
+  active,
+  subByComp,
+  showScores,
+  pools,
 }: {
-  roster: Competitor[];
-  scores: Record<string, number>;
-  accent: string;
+  active: ArenaState["active"];
+  subByComp: Map<string, Submission>;
+  showScores: boolean;
+  pools: ArenaState["pools"];
 }) {
-  const ranked = [...roster].sort((a, b) => (scores[b.id] ?? 0) - (scores[a.id] ?? 0));
-  const hasScores = Object.keys(scores).length > 0;
+  if (active && showScores) {
+    const ranked = [...active.competitors]
+      .map((c) => ({ c, score: subByComp.get(c.id)?.score ?? 0 }))
+      .sort((a, b) => b.score - a.score);
+    return (
+      <Panel title="LIVE SCOREBOARD">
+        {ranked.map(({ c, score }, i) => (
+          <Row key={c.id} rank={i + 1} label={c.gpu.model} value={Math.round(score)} />
+        ))}
+      </Panel>
+    );
+  }
+  // idle: overall leaderboard by points
+  const all = pools.flatMap((p) => p.competitors).sort((a, b) => b.points - a.points).slice(0, 8);
+  return (
+    <Panel title="LEADERBOARD">
+      {all.length === 0 ? (
+        <div className="col-span-full text-center text-[11px] text-slate-500">No GPUs connected yet.</div>
+      ) : (
+        all.map((c, i) => <Row key={c.id} rank={i + 1} label={c.gpu.model} value={c.points} />)
+      )}
+    </Panel>
+  );
+}
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="clip-card glass mt-4 p-4">
-      <div className={`mb-3 font-display text-sm font-bold tracking-wide ${accent}`}>LIVE SCOREBOARD</div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {ranked.map((c, i) => (
-          <div key={c.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2">
-            <span className="text-xs text-slate-300">
-              <span className="mr-2 text-slate-500">{i + 1}</span>
-              {c.gpu.model}
-            </span>
-            <span className="text-sm font-bold tabular-nums">
-              {hasScores ? Math.round(scores[c.id] ?? 0) : "—"}
-            </span>
-          </div>
-        ))}
+      <div className="mb-3 font-display text-sm font-bold tracking-wide text-arena-tier2">{title}</div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">{children}</div>
+    </div>
+  );
+}
+
+function Row({ rank, label, value }: { rank: number; label: string; value: number | string }) {
+  return (
+    <div className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2">
+      <span className="text-xs text-slate-300">
+        <span className="mr-2 text-slate-500">{rank}</span>
+        {label}
+      </span>
+      <span className="text-sm font-bold tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+/* ----------------------------- Queue ----------------------------- */
+
+function QueueStrip({ queue }: { queue: Bounty[] }) {
+  return (
+    <div className="clip-card glass mt-4 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="font-display text-sm font-bold tracking-wide text-arena-tier1">BATTLE QUEUE</span>
+        <span className="text-[10px] text-slate-500">{queue.length} waiting · runs first-in, first-out</span>
       </div>
+      {queue.length === 0 ? (
+        <div className="text-[11px] text-slate-500">Queue is empty. New bounties battle in the order they’re posted.</div>
+      ) : (
+        <div className="space-y-2">
+          {queue.map((b, i) => (
+            <div key={b.id} className="flex items-center gap-3 rounded-md bg-white/5 px-3 py-2">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-arena-tier1/15 text-[11px] font-bold text-arena-tier1">
+                {i + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-slate-200">{b.title}</span>
+              <span className="shrink-0 text-[10px] text-slate-500">Tier {b.tier}</span>
+              <span className="shrink-0 text-xs font-bold text-arena-sol">{b.prizeAmount.toLocaleString()} $ARENA</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 /* ----------------------------- Stat bar ----------------------------- */
 
-function StatBar() {
-  const stats = [
-    ["Total Battles", "12,847"],
-    ["SOL Paid Out", "234,982"],
-    ["Active GPUs", "1,248"],
-    ["Battles Today", "382"],
-    ["Avg Response", "12.4s"],
+function StatBar({ stats }: { stats?: ArenaState["stats"] }) {
+  const items = [
+    ["Battles Done", (stats?.battlesCompleted ?? 0).toLocaleString()],
+    ["$ARENA Paid Out", (stats?.totalPaidOut ?? 0).toLocaleString()],
+    ["🔥 $ARENA Burned", (stats?.totalBurned ?? 0).toLocaleString()],
+    ["Active GPUs", (stats?.activeGpus ?? 0).toLocaleString()],
   ];
   return (
-    <div className="clip-card glass mt-4 grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-5">
-      {stats.map(([k, v]) => (
+    <div className="clip-card glass mt-4 grid grid-cols-2 gap-3 p-4 lg:grid-cols-4">
+      {items.map(([k, v]) => (
         <div key={k} className="text-center">
           <div className="font-display text-lg font-black text-slate-100">{v}</div>
           <div className="text-[10px] uppercase tracking-wide text-slate-500">{k}</div>
         </div>
       ))}
     </div>
+  );
+}
+
+/* --------------------------- How it works --------------------------- */
+
+function HowItWorks({ onCreateBounty, onConnect }: { onCreateBounty: () => void; onConnect: () => void }) {
+  const steps = [
+    { n: 1, t: "Connect your GPU", d: "Run the agent locally. It detects your real card and slots you into the fair tier — no faking." },
+    { n: 2, t: "Someone posts a bounty", d: "A prompt + token prize. It joins the queue and battles when its turn comes — one at a time." },
+    { n: 3, t: "The pool battles", d: "Every GPU in that tier answers. Answers stream into the arena live during the window." },
+    { n: 4, t: "Best answer wins", d: "A blind AI judge scores anonymously. Winner gets 75%; 25% of the prize is burned." },
+  ];
+  return (
+    <section className="clip-card glass mt-8 p-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="font-display text-lg font-black tracking-wide text-arena-tier2">HOW IT WORKS</h3>
+        <div className="flex gap-2">
+          <button onClick={onConnect} className="clip-card border border-arena-tier2/40 px-4 py-2 text-xs font-bold text-arena-tier2 transition hover:bg-arena-tier2/10">
+            ⚡ Connect GPU
+          </button>
+          <button onClick={onCreateBounty} className="clip-card bg-gradient-to-r from-arena-sol to-arena-solb px-4 py-2 text-xs font-bold text-black">
+            + Create Bounty
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {steps.map((s) => (
+          <div key={s.n} className="rounded-lg border border-white/8 bg-white/5 p-4">
+            <div className="mb-2 grid h-8 w-8 place-items-center rounded-full bg-arena-tier2/15 font-display text-sm font-bold text-arena-tier2">
+              {s.n}
+            </div>
+            <div className="text-sm font-semibold text-slate-100">{s.t}</div>
+            <div className="mt-1 text-[12px] leading-snug text-slate-400">{s.d}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="mt-8 flex flex-col items-center justify-between gap-4 border-t border-white/10 pt-6 sm:flex-row">
+      <div className="flex items-center gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.png" alt="GPU Arena" className="h-7 w-7 object-contain" />
+        <div className="text-xs text-slate-400">
+          <span className="font-display font-bold text-slate-200">GPU ARENA</span> · GPUs battle, best answer wins ·
+          built on Solana
+        </div>
+      </div>
+      <div className="flex items-center gap-4">
+        <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-arena-tier2">
+          GitHub
+        </a>
+        <a href={TWITTER_URL} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-arena-tier2">
+          X / Twitter
+        </a>
+      </div>
+    </footer>
   );
 }

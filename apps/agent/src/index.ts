@@ -1,5 +1,5 @@
 import { classifyGpu, TIER_LABELS } from "@gpu-arena/shared";
-import type { Bounty } from "@gpu-arena/shared";
+import type { ArenaState, Tier } from "@gpu-arena/shared";
 import { detectGpu } from "./gpu-detect.js";
 import { loadOrCreateWallet, signMessage } from "./wallet.js";
 
@@ -16,17 +16,28 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** Pick the model for this GPU's tier: smaller for Tier 1, bigger for Tier 2. */
+function modelForTier(tier: Tier): string {
+  return tier === 1
+    ? process.env.OLLAMA_MODEL_TIER1 || "llama3.2:3b"
+    : process.env.OLLAMA_MODEL_TIER2 || "llama3.1:8b";
+}
+
 /** Produce an answer using a local LLM if configured, else a stub. */
-async function generateAnswer(prompt: string): Promise<{ answer: string; latencyMs: number }> {
+async function generateAnswer(
+  prompt: string,
+  tier: Tier,
+): Promise<{ answer: string; latencyMs: number }> {
   const start = Date.now();
   const url = process.env.OLLAMA_URL;
   if (url) {
+    const model = modelForTier(tier);
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: process.env.OLLAMA_MODEL || "llama3.1",
+          model,
           prompt,
           stream: false,
         }),
@@ -68,16 +79,19 @@ async function main() {
   console.log(`[agent] registered in ${TIER_LABELS[gpu.tier]}`);
 
   const seen = new Set<string>();
-  console.log("[agent] watching for bounties in my tier… (Ctrl+C to stop)");
+  console.log("[agent] watching for battles in my tier… (Ctrl+C to stop)");
   for (;;) {
     try {
-      const { bounties } = await api<{ bounties: Bounty[] }>("/api/bounties");
-      for (const b of bounties) {
-        if (b.tier !== gpu.tier || b.status === "settled" || seen.has(b.id)) continue;
-        seen.add(b.id);
-        console.log(`[agent] battling bounty "${b.title}" (${b.prizeAmount} prize)`);
-        const { answer, latencyMs } = await generateAnswer(b.prompt);
-        await api(`/api/bounties/${b.id}/submit`, {
+      const state = await api<ArenaState>("/api/arena/state");
+      const battle = state.active;
+      // Only the active battle in my tier accepts answers, and only once.
+      if (battle && state.phase === "battling" && battle.bounty.tier === gpu.tier && !seen.has(battle.bounty.id)) {
+        seen.add(battle.bounty.id);
+        console.log(
+          `[agent] battling "${battle.bounty.title}" (${battle.bounty.prizeAmount} prize) using ${modelForTier(gpu.tier)}`,
+        );
+        const { answer, latencyMs } = await generateAnswer(battle.bounty.prompt, gpu.tier);
+        await api(`/api/bounties/${battle.bounty.id}/submit`, {
           method: "POST",
           body: JSON.stringify({ wallet: pubkey, answer, latencyMs }),
         });
@@ -86,7 +100,7 @@ async function main() {
     } catch (err) {
       console.warn("[agent] poll error:", (err as Error).message);
     }
-    await new Promise((r) => setTimeout(r, 4000));
+    await new Promise((r) => setTimeout(r, 2500));
   }
 }
 

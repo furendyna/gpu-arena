@@ -24,8 +24,8 @@ export function TokenConfetti({ count = 28 }: { count?: number }) {
             <div
               className="h-full w-full rounded-full"
               style={{
-                background: "linear-gradient(135deg,#14f195,#9945ff)",
-                boxShadow: "0 0 12px rgba(20,241,149,0.7)",
+                background: "linear-gradient(135deg,#ffa45c,#ff751f)",
+                boxShadow: "0 0 12px rgba(255,117,31,0.7)",
               }}
             />
           </motion.div>
