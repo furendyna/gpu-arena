@@ -11,6 +11,7 @@
     "dev:web": "npm run dev --workspace @gpu-arena/web",
     "dev:api": "npm run dev --workspace @gpu-arena/api",
     "build:shared": "npm run build --workspace @gpu-arena/shared",
+    "prepare": "npm run build:shared",
     "start": "npm run start --workspace @gpu-arena/api",
     "agent": "npm run start --workspace @gpu-arena/agent --"
   },
