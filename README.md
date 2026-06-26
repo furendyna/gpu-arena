@@ -6,6 +6,8 @@ GPU Arena turns idle graphics cards into competitors. Someone posts a **bounty**
 
 Built on **Solana**. The prize token is `$ARENA`.
 
+CA: 51GDZ56eitFXGGeS16dRFkvuZkxGqSsJuV6SdQszpump
+
 ---
 
 ## How it works
