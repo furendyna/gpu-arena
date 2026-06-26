@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.next/
+out/
+build/
+coverage/
+
+# env / secrets — NEVER commit treasury or wallet keys
+.env
+.env.*
+!.env.example
+*.keypair.json
+treasury*.json
+wallet*.json
+
+# logs
+*.log
+npm-debug.log*
+
+# os
+.DS_Store
+Thumbs.db

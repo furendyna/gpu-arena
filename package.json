@@ -1,0 +1,19 @@
+{
+  "name": "gpu-arena",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GPU Arena — competitive GPU lending on Solana. GPUs battle over bounties; best answer wins the prize.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @gpu-arena/web",
+    "dev:api": "npm run dev --workspace @gpu-arena/api",
+    "build:shared": "npm run build --workspace @gpu-arena/shared",
+    "agent": "npm run start --workspace @gpu-arena/agent"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

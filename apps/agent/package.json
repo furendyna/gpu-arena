@@ -1,0 +1,21 @@
+{
+  "name": "@gpu-arena/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "detect": "tsx src/detect-cli.ts"
+  },
+  "dependencies": {
+    "@gpu-arena/shared": "*",
+    "@solana/web3.js": "^1.95.3",
+    "bs58": "^6.0.0",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.6.0"
+  }
+}
