@@ -1,5 +1,9 @@
 node_modules/
 dist/
+# Keep the shared package's compiled output so runtime resolution never depends
+# on a build step running first (Vercel/Railway).
+!packages/shared/dist/
+!packages/shared/dist/**
 .next/
 out/
 build/
