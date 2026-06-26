@@ -6,6 +6,8 @@ import { BURN_RATE, MIN_PRIZE } from "@gpu-arena/shared";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import {
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
   createTransferCheckedInstruction,
   getAssociatedTokenAddress,
@@ -49,17 +51,37 @@ export function CreateBountyModal({ open, onClose }: { open: boolean; onClose: (
 
     const mint = new PublicKey(cfg.prizeTokenMint);
     const treasury = new PublicKey(cfg.treasuryAddress);
-    const mintInfo = await getMint(connection, mint);
+
+    // pump.fun and many newer tokens use the Token-2022 program. Detect which
+    // program owns the mint so the transfer uses the right instructions.
+    const mintAccount = await connection.getAccountInfo(mint);
+    if (!mintAccount) throw new Error("Prize token mint not found on-chain");
+    const tokenProgram = mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)
+      ? TOKEN_2022_PROGRAM_ID
+      : TOKEN_PROGRAM_ID;
+
+    const mintInfo = await getMint(connection, mint, undefined, tokenProgram);
     const amount = BigInt(Math.round(prize * 10 ** mintInfo.decimals));
 
-    const fromAta = await getAssociatedTokenAddress(mint, publicKey);
-    const toAta = await getAssociatedTokenAddress(mint, treasury);
+    const fromAta = await getAssociatedTokenAddress(mint, publicKey, false, tokenProgram);
+    const toAta = await getAssociatedTokenAddress(mint, treasury, false, tokenProgram);
 
     const tx = new Transaction();
     if (!(await connection.getAccountInfo(toAta))) {
-      tx.add(createAssociatedTokenAccountInstruction(publicKey, toAta, treasury, mint));
+      tx.add(createAssociatedTokenAccountInstruction(publicKey, toAta, treasury, mint, tokenProgram));
     }
-    tx.add(createTransferCheckedInstruction(fromAta, mint, toAta, publicKey, amount, mintInfo.decimals));
+    tx.add(
+      createTransferCheckedInstruction(
+        fromAta,
+        mint,
+        toAta,
+        publicKey,
+        amount,
+        mintInfo.decimals,
+        [],
+        tokenProgram,
+      ),
+    );
 
     const sig = await sendTransaction(tx, connection);
     const bh = await connection.getLatestBlockhash();
@@ -101,8 +123,12 @@ export function CreateBountyModal({ open, onClose }: { open: boolean; onClose: (
       setState("done");
       setMessage(`Bounty live in Tier ${bounty.tier} for ${bounty.prizeAmount.toLocaleString()} tokens!`);
     } catch (err) {
+      console.error("[create-bounty]", err);
+      const e = err as Error;
       setState("error");
-      setMessage((err as Error).message || "Something went wrong.");
+      // Some @solana/spl-token errors carry an empty message; fall back to the
+      // error name so the cause is never silently hidden.
+      setMessage(e?.message || e?.name || "Something went wrong.");
     }
   };
 

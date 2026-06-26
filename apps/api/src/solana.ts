@@ -5,6 +5,8 @@ import {
   clusterApiUrl,
 } from "@solana/web3.js";
 import {
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   getOrCreateAssociatedTokenAccount,
   getMint,
   transfer,
@@ -49,6 +51,16 @@ function getConnection(): Connection {
     process.env.SOLANA_RPC_URL ||
     clusterApiUrl((process.env.SOLANA_CLUSTER as any) || "mainnet-beta");
   return new Connection(url, "confirmed");
+}
+
+/**
+ * Detect whether a mint is owned by the classic SPL Token program or Token-2022
+ * (pump.fun mints use Token-2022). Falls back to the classic program.
+ */
+async function getTokenProgramId(connection: Connection, mint: PublicKey): Promise<PublicKey> {
+  const info = await connection.getAccountInfo(mint);
+  if (info && info.owner.equals(TOKEN_2022_PROGRAM_ID)) return TOKEN_2022_PROGRAM_ID;
+  return TOKEN_PROGRAM_ID;
 }
 
 /** Public treasury address (from the secret key, or TREASURY_ADDRESS), or null. */
@@ -139,12 +151,17 @@ export async function payoutToWinner(
   const connection = getConnection();
   const mint = new PublicKey(mintStr);
   const winner = new PublicKey(winnerWalletB58);
+  const tokenProgram = await getTokenProgramId(connection, mint);
 
-  const mintInfo = await getMint(connection, mint);
+  const mintInfo = await getMint(connection, mint, undefined, tokenProgram);
   const baseAmount = BigInt(Math.round(uiAmount * 10 ** mintInfo.decimals));
 
-  const fromAta = await getOrCreateAssociatedTokenAccount(connection, treasury, mint, treasury.publicKey);
-  const toAta = await getOrCreateAssociatedTokenAccount(connection, treasury, mint, winner);
+  const fromAta = await getOrCreateAssociatedTokenAccount(
+    connection, treasury, mint, treasury.publicKey, false, undefined, undefined, tokenProgram,
+  );
+  const toAta = await getOrCreateAssociatedTokenAccount(
+    connection, treasury, mint, winner, false, undefined, undefined, tokenProgram,
+  );
 
   const signature = await transfer(
     connection,
@@ -153,6 +170,9 @@ export async function payoutToWinner(
     toAta.address,
     treasury,
     baseAmount,
+    [],
+    undefined,
+    tokenProgram,
   );
   return { simulated: false, signature };
 }
@@ -181,10 +201,15 @@ export async function burnPrize(uiAmount: number): Promise<PayoutResult> {
 
   const connection = getConnection();
   const mint = new PublicKey(mintStr);
-  const mintInfo = await getMint(connection, mint);
+  const tokenProgram = await getTokenProgramId(connection, mint);
+  const mintInfo = await getMint(connection, mint, undefined, tokenProgram);
   const baseAmount = BigInt(Math.round(uiAmount * 10 ** mintInfo.decimals));
 
-  const treasuryAta = await getOrCreateAssociatedTokenAccount(connection, treasury, mint, treasury.publicKey);
-  const signature = await burn(connection, treasury, treasuryAta.address, mint, treasury, baseAmount);
+  const treasuryAta = await getOrCreateAssociatedTokenAccount(
+    connection, treasury, mint, treasury.publicKey, false, undefined, undefined, tokenProgram,
+  );
+  const signature = await burn(
+    connection, treasury, treasuryAta.address, mint, treasury, baseAmount, [], undefined, tokenProgram,
+  );
   return { simulated: false, signature };
 }
