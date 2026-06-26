@@ -51,7 +51,7 @@ function useArenaState() {
 }
 
 export function Arena() {
-  const { state, offline } = useArenaState();
+  const { state } = useArenaState();
   const [createOpen, setCreateOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
 
@@ -87,7 +87,6 @@ export function Arena() {
         onConnect={() => setConnectOpen(true)}
         active={active}
         queue={state?.queue ?? []}
-        offline={offline}
       />
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[300px_1fr_300px]">
@@ -140,13 +139,11 @@ function Header({
   onConnect,
   active,
   queue,
-  offline,
 }: {
   onCreateBounty: () => void;
   onConnect: () => void;
   active: ArenaState["active"];
   queue: Bounty[];
-  offline: boolean;
 }) {
   const shown = active?.bounty ?? queue[0] ?? null;
   const label = active ? "Active Battle" : queue.length ? "Next Up" : "No active battle";
@@ -186,7 +183,6 @@ function Header({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-[10px] uppercase tracking-[0.25em] text-arena-sol">{label}</span>
-            {offline && <span className="text-[10px] text-red-400">· API offline (run npm run dev:api)</span>}
           </div>
           <div className="truncate text-sm font-semibold text-slate-100">
             {shown ? shown.title : "Create a bounty to start the next battle"}
