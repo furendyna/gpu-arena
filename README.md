@@ -1,106 +1,173 @@
 # GPU Arena
 
-**Competitive GPU lending on Solana.** Instead of renting your GPU for boring background jobs, you join a **pool** and your GPU *fights* over bounties. Someone posts a prompt with a token prize, every GPU in the pool answers, and a **blind AI judge** picks the best answer — which wins the prize.
+**Put your GPU in the arena. Best answer wins.**
 
-Because the strongest card would otherwise always win, GPUs are split into **tiers** and judged on *answer quality*, not raw power.
+GPU Arena turns idle graphics cards into competitors. Someone posts a **bounty** (a prompt + a token prize), every GPU in the matching pool answers it, and a **blind judge** picks the best answer. The winner takes the prize. It's GPU lending — but instead of boring background jobs, your card *fights* for rewards.
 
-## How battles run
+Built on **Solana**. The prize token is `$ARENA`.
 
-GPUs just connect and wait — **nothing battles until someone posts a bounty**. Bounties are processed by an automatic orchestrator **one at a time, first-in-first-out**: a submission window opens for the bounty's tier, every GPU answers, the blind judge scores, and the prize settles. No one can manually trigger a battle.
+---
 
-**Prize split:** the winner receives **75%**; **25% of every prize is burned** (tracked arena-wide). Tunable timings live in `apps/api/.env` (`BATTLE_WINDOW_MS`, `JUDGE_PAUSE_MS`, `REVEAL_MS`).
+## How it works
+
+1. **Connect your GPU.** Run a tiny local agent. It detects your real card and places you in the fair tier automatically.
+2. **Someone posts a bounty.** A prompt with a token prize. Nothing battles until a bounty exists.
+3. **The pool battles.** Every GPU in that tier answers within a short window. Answers stream into the arena live.
+4. **Best answer wins.** A blind judge scores the answers anonymously. The winner is paid; a slice is burned.
+
+**Prize split:** winner gets **75%**, and **25% of every prize is burned** forever (tracked arena-wide).
+
+### Fair tiers
+
+Strong cards would always win on speed, so GPUs are split into tiers and judged on **answer quality**, not power:
 
 | Tier | Pool | Hardware |
 | --- | --- | --- |
 | **Tier 1** | Pool Alpha | NVIDIA RTX 20-series & older (GTX 16/10), AMD RX 5000 & older |
 | **Tier 2** | Pool Omega | NVIDIA RTX 30-series & newer (40/50), AMD RX 6000+, Intel Arc |
 
-## Why no smart contract?
+---
 
-This MVP uses **custodial escrow**: a backend treasury wallet holds the bounty prize and pays the winner with a standard SPL-token transfer. No custom on-chain program to write, audit, or deploy.
+## For competitors — enter the arena
 
-> ⚠️ **Tradeoff:** users must trust the treasury to pay out fairly. Fine for an MVP; swap in an on-chain escrow program later without touching the rest.
+You don't connect your GPU through the website (a browser can't read your hardware). Instead you run a small agent:
 
-## Anti-cheat: you can't fake your tier
+```bash
+git clone https://github.com/furendyna/gpu-arena.git
+cd gpu-arena && npm install
 
-Tier is **never** user-entered. The GPU client agent detects the real card from hardware (`nvidia-smi` / OS query), then **signs** the detected GPU + wallet with its Solana key. The API verifies the ed25519 signature and computes the tier itself. Unknown/spoofed hardware falls back to Tier 1.
+# Enter the arena. Winnings are paid to the address you pass.
+npm run agent -- --wallet YOUR_SOLANA_ADDRESS
+```
 
-## Structure
+That's it — the agent detects your GPU, slots you into the correct tier, watches for bounties, and answers them. You can add `--handle yourname` to show a custom name.
+
+**Just want to check your tier?**
+
+```bash
+npm run detect --workspace @gpu-arena/agent
+```
+
+---
+
+## For bounty creators — post a task
+
+On the site: **Connect Wallet** (Phantom / Solflare, top-right) → **Create Bounty**. You set the prompt, tier, and prize. Your wallet funds the prize into the treasury, and the bounty joins the queue. Battles run **one at a time, first-come-first-served**.
+
+---
+
+## Judging (no power bias)
+
+Answers are sent to the judge **anonymously** (Answer A, B, C…), so a competitor's identity or GPU power can't influence the score — only quality wins.
+
+- The judge runs on a **local Ollama model** (set by `JUDGE_MODEL`, e.g. `llama3.1:8b`).
+- If Ollama isn't reachable, a built-in **offline scorer** takes over so battles never stall.
+
+---
+
+## Trust & anti-cheat
+
+- **You can't fake your tier.** The agent detects your card from hardware (`nvidia-smi` / OS query), then **cryptographically signs** it with your Solana key. The server verifies the signature and computes the tier itself — self-reported tiers are ignored.
+- **Custodial escrow.** A backend treasury wallet holds prizes and pays winners with standard SPL transfers (no custom smart contract in this version). The tradeoff: you trust the treasury to pay out fairly — reasonable for an MVP, and swappable for an on-chain escrow program later.
+
+---
+
+## Project structure
 
 ```
-packages/shared   Types + GPU→tier classification (the anti-cheat core)
-apps/web          Next.js arena UI + battle animation (the cool visual)
-apps/api          Express backend: pools, bounties, blind AI judge, treasury payout (Upstash Redis)
+packages/shared   Shared types + GPU→tier classification (the anti-cheat core)
+apps/web          Next.js arena UI + live battle animation
+apps/api          Express backend: pools, bounties, blind judge, treasury, Upstash storage
 apps/agent        GPU client: detect → sign → compete
 ```
 
-## Quick start
+---
 
-> **Database:** the API persists to **Upstash Redis**. Create a free DB at
-> [console.upstash.com](https://console.upstash.com) and set `UPSTASH_REDIS_REST_URL`
-> + `UPSTASH_REDIS_REST_TOKEN` in `apps/api/.env` before starting the API.
+## Run it locally (development)
+
+You'll need an [Upstash Redis](https://console.upstash.com) database (free tier is fine) — the API stores everything there.
 
 ```bash
 npm install
 
-# 1) API (terminal A)
-cp apps/api/.env.example apps/api/.env   # set Upstash creds (required) + payout config
+# 1) API  (terminal A)
+cp apps/api/.env.example apps/api/.env     # then fill in your values (see below)
 npm run dev:api
 
-# 2) Web arena (terminal B)
-npm run dev:web        # http://localhost:3000
+# 2) Web  (terminal B)
+cp apps/web/.env.example apps/web/.env
+npm run dev:web                            # http://localhost:3000
 
-# 3) A competing GPU (terminal C)
-cp apps/agent/.env.example apps/agent/.env
-npm run agent
+# 3) A competing GPU  (terminal C)
+npm run agent -- --wallet YOUR_SOLANA_ADDRESS
 ```
 
-### Just see your GPU's tier
+---
+
+## Configuration
+
+All configuration is via environment variables. **Copy the `.env.example` files and fill in your own values** — never edit secrets directly into code, and never commit a real `.env`.
+
+### Web app (`apps/web/.env`) — all public
+
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_API_URL` | URL of the API (e.g. your Railway URL) |
+| `NEXT_PUBLIC_SOLANA_CLUSTER` | `mainnet-beta` or `devnet` |
+| `NEXT_PUBLIC_SOLANA_RPC_URL` | RPC endpoint for wallet connections (optional) |
+| `NEXT_PUBLIC_GITHUB_URL` / `NEXT_PUBLIC_TWITTER_URL` | Header/footer links (optional) |
+
+### API (`apps/api/.env`)
+
+| Variable | Secret? | Purpose |
+| --- | --- | --- |
+| `UPSTASH_REDIS_REST_URL` | — | Upstash database URL |
+| `UPSTASH_REDIS_REST_TOKEN` | 🔒 **secret** | Upstash database token |
+| `SOLANA_CLUSTER` | — | `mainnet-beta` or `devnet` |
+| `SOLANA_RPC_URL` | 🔒 *sensitive* | RPC endpoint (paid RPC keys are sensitive) |
+| `PRIZE_TOKEN_MINT` | — | The `$ARENA` token mint address |
+| `TREASURY_SECRET_KEY` | 🔒 **secret** | Base58 private key of the treasury wallet |
+| `ENABLE_REAL_PAYOUTS` | — | `true` to send real tokens; otherwise payouts are simulated |
+| `JUDGE_MODEL` | — | Ollama model for judging (e.g. `llama3.1:8b`) |
+| `OLLAMA_URL` | — | Ollama endpoint; leave unset to use the offline scorer |
+
+> 🔒 **Secrets** (treasury key, tokens, paid RPC keys) belong **only** in your hosting provider's environment settings (Railway/Vercel) — never in the repo. The `.gitignore` already blocks `.env` files and `*.keypair.json`.
+
+---
+
+## Deployment
+
+Three pieces, three homes:
+
+| Piece | Where it runs | Why |
+| --- | --- | --- |
+| **Web** (`apps/web`) | **Vercel** | Static/serverless is perfect for a frontend |
+| **API** (`apps/api`) | **Railway / Render / Fly / VPS** | Needs an always-on server (the battle loop runs 24/7) |
+| **Database** | **Upstash Redis** | Persistent storage the API connects to |
+
+- **Vercel:** set **Root Directory** to `apps/web`, add the `NEXT_PUBLIC_*` variables (including `NEXT_PUBLIC_API_URL` pointing at your API).
+- **Railway:** deploy the repo, keep **Root Directory** at the repo root, start command `npm run start --workspace @gpu-arena/api`, and add the API variables above.
+
+> The **agent** isn't hosted — competitors run it on their own machines.
+
+---
+
+## Creating the `$ARENA` token
+
+Real prizes need a token + a treasury. Test on **devnet** first (it's free and auto-airdrops fee SOL):
 
 ```bash
-npm run detect --workspace @gpu-arena/agent
-# or test a specific card:
-# GPU_OVERRIDE="NVIDIA GeForce RTX 4090" npm run detect --workspace @gpu-arena/agent
-```
-
-## Judging
-
-Answers are sent to the judge **anonymously** (Answer A, B, C…) so identity/power can't bias the score. The judge runs on a **local Ollama model** (`JUDGE_MODEL`, default `llama3.1` — run `ollama pull llama3.1` first). If Ollama is unreachable, a deterministic offline heuristic scores answers so everything still runs.
-
-## Funding bounties (Connect Wallet)
-
-Creating a bounty pulls the prize from the creator's wallet into the treasury (true escrow), then the API verifies the on-chain transfer before the bounty goes live.
-
-1. **Create the token + treasury** (one time). Test on devnet first — it's free:
-
-```bash
-# devnet (free, auto-airdrops fee SOL)
+# devnet (recommended first)
 SOLANA_CLUSTER=devnet npm run create-token --workspace @gpu-arena/api
-```
 
-The script prints the values to copy into `apps/api/.env` (`PRIZE_TOKEN_MINT`, `TREASURY_SECRET_KEY`) and `apps/web/.env` (`NEXT_PUBLIC_*`). It saves a `treasury.keypair.json` if you didn't supply one.
-
-2. **Point the web app at the same network** in `apps/web/.env`:
-
-```bash
-NEXT_PUBLIC_SOLANA_CLUSTER=devnet      # or mainnet-beta
-NEXT_PUBLIC_PRIZE_TOKEN_MINT=<mint>
-NEXT_PUBLIC_TREASURY_ADDRESS=<treasury>
-```
-
-3. **Connect Wallet** (top-right, Phantom/Solflare), then **Create Bounty** → your wallet signs a transfer of the prize to the treasury. The API checks `/api/config` → `escrowEnabled` and verifies the funding tx.
-
-> If no mint/treasury is configured, the app stays in **demo mode**: bounties are created without on-chain funding so you can develop the UI offline.
-
-## Going to mainnet (real prizes)
-
-1. Re-run the token script on mainnet with a wallet that has ~0.05 SOL for fees:
-
-```bash
+# mainnet (real) — needs a wallet with ~0.05 SOL for fees
 SOLANA_CLUSTER=mainnet-beta npm run create-token --workspace @gpu-arena/api
 ```
 
-2. Update both `.env` files to `mainnet-beta` with the real mint/treasury.
-3. Set `ENABLE_REAL_PAYOUTS=true`. Until then, payouts are **simulated** so nothing moves by accident.
+The script prints the values to set in your environments (`PRIZE_TOKEN_MINT`, `TREASURY_SECRET_KEY`). Once they're configured and `ENABLE_REAL_PAYOUTS=true`, bounty funding, payouts, and burns are fully live. Until then the app runs in a safe simulated mode.
 
-Keep `TREASURY_SECRET_KEY` and any `*.keypair.json` secret — they're gitignored.
+---
+
+## License
+
+MIT
