@@ -4,6 +4,8 @@ import { Buffer } from "buffer";
 import { useMemo } from "react";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
+import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
+import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 import { clusterApiUrl } from "@solana/web3.js";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
@@ -22,9 +24,17 @@ export function WalletProviders({ children }: { children: React.ReactNode }) {
     return process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(cluster);
   }, []);
 
+  // Modern wallets register via the Wallet Standard, but explicitly listing the
+  // common adapters guarantees they appear even when standard auto-detection
+  // doesn't fire (browser injection timing, etc.).
+  const wallets = useMemo(
+    () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
+    [],
+  );
+
   return (
     <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={[]} autoConnect>
+      <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>{children}</WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>
