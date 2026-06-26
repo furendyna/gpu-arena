@@ -8,29 +8,27 @@ export interface JudgedResult {
 /**
  * Blind AI judge. Answers are scored WITHOUT any GPU/competitor identity attached,
  * so a powerful card gets no advantage — only answer quality matters.
+ *
+ * Primary judge is a local Ollama model. If Ollama is unreachable/errors, it
+ * falls back to a deterministic offline heuristic so battles never get stuck.
  */
 export async function judge(prompt: string, submissions: Submission[]): Promise<JudgedResult> {
   if (submissions.length === 0) {
     throw new Error("no submissions to judge");
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (apiKey) {
-    try {
-      return await judgeWithLLM(apiKey, prompt, submissions);
-    } catch (err) {
-      console.warn("[judge] LLM judge failed, falling back to heuristic:", err);
-    }
+  try {
+    return await judgeWithOllama(prompt, submissions);
+  } catch (err) {
+    console.warn("[judge] Ollama judge failed, falling back to heuristic:", err);
+    return heuristicJudge(submissions);
   }
-  return heuristicJudge(submissions);
 }
 
-async function judgeWithLLM(
-  apiKey: string,
-  prompt: string,
-  submissions: Submission[],
-): Promise<JudgedResult> {
-  const model = process.env.JUDGE_MODEL || "gpt-4o-mini";
+async function judgeWithOllama(prompt: string, submissions: Submission[]): Promise<JudgedResult> {
+  const baseUrl = (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, "");
+  const model = process.env.JUDGE_MODEL || "llama3.1:8b";
+
   // Present answers anonymously as A, B, C... — identity is never revealed.
   const labels = submissions.map((_, i) => String.fromCharCode(65 + i));
   const anon = submissions
@@ -41,22 +39,25 @@ async function judgeWithLLM(
     "You are an impartial judge in a GPU answer competition. Score each anonymous answer 0-100 for accuracy, coherence, depth, and relevance to the prompt. Do not consider length alone. Respond ONLY with strict JSON: {\"scores\":[{\"label\":\"A\",\"score\":87,\"rationale\":\"...\"}]}.";
   const user = `Prompt:\n${prompt}\n\nAnswers:\n${anon}`;
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+  const res = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model,
-      temperature: 0,
-      response_format: { type: "json_object" },
+      stream: false,
+      format: "json",
+      options: { temperature: 0 },
       messages: [
         { role: "system", content: sys },
         { role: "user", content: user },
       ],
     }),
   });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
-  const data = (await res.json()) as any;
-  const parsed = JSON.parse(data.choices[0].message.content) as {
+  if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
+  const data = (await res.json()) as { message?: { content?: string } };
+  const content = data.message?.content;
+  if (!content) throw new Error("Ollama returned no content");
+  const parsed = JSON.parse(content) as {
     scores: Array<{ label: string; score: number; rationale: string }>;
   };
 
@@ -69,6 +70,7 @@ async function judgeWithLLM(
     scores[sub.id] = { score: clamp(item.score), rationale: item.rationale ?? "" };
     if (scores[sub.id].score > best.score) best = { id: sub.id, score: scores[sub.id].score };
   }
+  if (Object.keys(scores).length === 0) throw new Error("Ollama returned no usable scores");
   return { scores, winnerSubmissionId: best.id };
 }
 

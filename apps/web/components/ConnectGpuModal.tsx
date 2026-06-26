@@ -49,38 +49,30 @@ export function ConnectGpuModal({ open, onClose }: { open: boolean; onClose: () 
     >
       <div className="space-y-5">
         <Step n={1} title="Get the project & install">
-          <Cmd>git clone {GITHUB_URL}.git</Cmd>
+          <Cmd>{`git clone ${GITHUB_URL}.git`}</Cmd>
           <Cmd>cd gpu-arena && npm install</Cmd>
         </Step>
 
-        <Step n={2} title="Check which pool your GPU lands in">
-          <Cmd>npm run detect --workspace @gpu-arena/agent</Cmd>
+        <Step n={2} title="Enter the arena with your wallet">
+          <Cmd>npm run agent -- --wallet YOUR_SOLANA_ADDRESS</Cmd>
           <p className="text-[11px] text-slate-400">
-            Tier is read from your hardware (<span className="text-slate-300">nvidia-smi</span>) — you can&apos;t pick it
-            yourself, so the pools stay fair.
+            That&apos;s it. The agent detects your real GPU, slots you into the fair tier, watches for bounties, and
+            answers them. Prizes are paid to{" "}
+            <span className="text-arena-tier1">the address you pass</span> — just a public address, never a private key.
+          </p>
+          <p className="text-[11px] text-slate-500">
+            Tier is read from your hardware (<span className="text-slate-300">nvidia-smi</span>), so you can&apos;t pick
+            it yourself — pools stay fair. Optionally add{" "}
+            <span className="font-mono text-slate-300">--handle yourname</span>.
           </p>
         </Step>
 
-        <Step n={3} title="Set a handle & payout wallet (optional)">
-          <Cmd>cp apps/agent/.env.example apps/agent/.env</Cmd>
-          <p className="text-[11px] text-slate-400">
-            Edit <span className="text-slate-300">HANDLE</span> in that file. A Solana wallet is auto-created on first
-            run at <span className="font-mono text-slate-300">agent.keypair.json</span> (kept private, gitignored) —
-            <span className="text-arena-tier1"> this is the wallet your winnings are paid to.</span>
-          </p>
-          <p className="text-[11px] text-slate-400">
-            Want prizes in a wallet you already own? Point{" "}
-            <span className="font-mono text-arena-tier1">WALLET_PATH</span> at that wallet&apos;s exported keypair file.
-          </p>
-        </Step>
-
-        <Step n={4} title="Enter the arena">
-          <Cmd>npm run agent</Cmd>
-          <p className="text-[11px] text-slate-400">
-            The agent registers your GPU, watches for bounties in your tier, generates answers, and submits them. Win
-            and the prize is sent to your wallet.
-          </p>
-        </Step>
+        <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-[11px] text-slate-400">
+          Just want to see which pool your card is in first?
+          <div className="mt-2">
+            <Cmd>npm run detect --workspace @gpu-arena/agent</Cmd>
+          </div>
+        </div>
 
         <div className="space-y-2 rounded-lg border border-arena-tier1/25 bg-arena-tier1/5 p-3 text-[11px] text-slate-300">
           <p>

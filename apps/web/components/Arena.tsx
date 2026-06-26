@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
 import type { ArenaState, Bounty, Competitor, Submission, Tier } from "@gpu-arena/shared";
 import { BURN_RATE, TIER_LABELS } from "@gpu-arena/shared";
@@ -12,6 +13,11 @@ import { TokenConfetti } from "./TokenConfetti";
 import { SocialLinks } from "./SocialLinks";
 import { CreateBountyModal } from "./CreateBountyModal";
 import { ConnectGpuModal } from "./ConnectGpuModal";
+
+const WalletButton = dynamic(
+  () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
+  { ssr: false },
+);
 
 const POLL_MS = 1200;
 
@@ -121,7 +127,7 @@ export function Arena() {
       <BattleScoreboard active={active} subByComp={subByComp} showScores={showScores} pools={pools} />
       <QueueStrip queue={state?.queue ?? []} />
       <StatBar stats={state?.stats} />
-      <HowItWorks onCreateBounty={() => setCreateOpen(true)} onConnect={() => setConnectOpen(true)} />
+      <HowItWorks />
       <Footer />
     </div>
   );
@@ -171,6 +177,7 @@ function Header({
           >
             + Create Bounty
           </button>
+          <WalletButton />
           <SocialLinks />
         </div>
       </div>
@@ -495,7 +502,7 @@ function StatBar({ stats }: { stats?: ArenaState["stats"] }) {
 
 /* --------------------------- How it works --------------------------- */
 
-function HowItWorks({ onCreateBounty, onConnect }: { onCreateBounty: () => void; onConnect: () => void }) {
+function HowItWorks() {
   const steps = [
     { n: 1, t: "Connect your GPU", d: "Run the agent locally. It detects your real card and slots you into the fair tier — no faking." },
     { n: 2, t: "Someone posts a bounty", d: "A prompt + token prize. It joins the queue and battles when its turn comes — one at a time." },
@@ -506,14 +513,6 @@ function HowItWorks({ onCreateBounty, onConnect }: { onCreateBounty: () => void;
     <section className="clip-card glass mt-8 p-6">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-display text-lg font-black tracking-wide text-arena-tier2">HOW IT WORKS</h3>
-        <div className="flex gap-2">
-          <button onClick={onConnect} className="clip-card border border-arena-tier2/40 px-4 py-2 text-xs font-bold text-arena-tier2 transition hover:bg-arena-tier2/10">
-            ⚡ Connect GPU
-          </button>
-          <button onClick={onCreateBounty} className="clip-card bg-gradient-to-r from-arena-sol to-arena-solb px-4 py-2 text-xs font-bold text-black">
-            + Create Bounty
-          </button>
-        </div>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {steps.map((s) => (

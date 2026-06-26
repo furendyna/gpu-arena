@@ -30,17 +30,21 @@ Tier is **never** user-entered. The GPU client agent detects the real card from 
 ```
 packages/shared   Types + GPU→tier classification (the anti-cheat core)
 apps/web          Next.js arena UI + battle animation (the cool visual)
-apps/api          Express backend: pools, bounties, blind AI judge, treasury payout
+apps/api          Express backend: pools, bounties, blind AI judge, treasury payout (Upstash Redis)
 apps/agent        GPU client: detect → sign → compete
 ```
 
 ## Quick start
 
+> **Database:** the API persists to **Upstash Redis**. Create a free DB at
+> [console.upstash.com](https://console.upstash.com) and set `UPSTASH_REDIS_REST_URL`
+> + `UPSTASH_REDIS_REST_TOKEN` in `apps/api/.env` before starting the API.
+
 ```bash
 npm install
 
 # 1) API (terminal A)
-cp apps/api/.env.example apps/api/.env   # fill in for real payouts
+cp apps/api/.env.example apps/api/.env   # set Upstash creds (required) + payout config
 npm run dev:api
 
 # 2) Web arena (terminal B)
@@ -61,12 +65,42 @@ npm run detect --workspace @gpu-arena/agent
 
 ## Judging
 
-Answers are sent to the judge **anonymously** (Answer A, B, C…) so identity/power can't bias the score. Set `OPENAI_API_KEY` in `apps/api/.env` to use an LLM judge; otherwise a deterministic local heuristic scores answers so everything runs offline.
+Answers are sent to the judge **anonymously** (Answer A, B, C…) so identity/power can't bias the score. The judge runs on a **local Ollama model** (`JUDGE_MODEL`, default `llama3.1` — run `ollama pull llama3.1` first). If Ollama is unreachable, a deterministic offline heuristic scores answers so everything still runs.
+
+## Funding bounties (Connect Wallet)
+
+Creating a bounty pulls the prize from the creator's wallet into the treasury (true escrow), then the API verifies the on-chain transfer before the bounty goes live.
+
+1. **Create the token + treasury** (one time). Test on devnet first — it's free:
+
+```bash
+# devnet (free, auto-airdrops fee SOL)
+SOLANA_CLUSTER=devnet npm run create-token --workspace @gpu-arena/api
+```
+
+The script prints the values to copy into `apps/api/.env` (`PRIZE_TOKEN_MINT`, `TREASURY_SECRET_KEY`) and `apps/web/.env` (`NEXT_PUBLIC_*`). It saves a `treasury.keypair.json` if you didn't supply one.
+
+2. **Point the web app at the same network** in `apps/web/.env`:
+
+```bash
+NEXT_PUBLIC_SOLANA_CLUSTER=devnet      # or mainnet-beta
+NEXT_PUBLIC_PRIZE_TOKEN_MINT=<mint>
+NEXT_PUBLIC_TREASURY_ADDRESS=<treasury>
+```
+
+3. **Connect Wallet** (top-right, Phantom/Solflare), then **Create Bounty** → your wallet signs a transfer of the prize to the treasury. The API checks `/api/config` → `escrowEnabled` and verifies the funding tx.
+
+> If no mint/treasury is configured, the app stays in **demo mode**: bounties are created without on-chain funding so you can develop the UI offline.
 
 ## Going to mainnet (real prizes)
 
-1. Create your SPL prize token and set `PRIZE_TOKEN_MINT`.
-2. Fund the treasury wallet (`TREASURY_SECRET_KEY`) with the token + some SOL for fees.
+1. Re-run the token script on mainnet with a wallet that has ~0.05 SOL for fees:
+
+```bash
+SOLANA_CLUSTER=mainnet-beta npm run create-token --workspace @gpu-arena/api
+```
+
+2. Update both `.env` files to `mainnet-beta` with the real mint/treasury.
 3. Set `ENABLE_REAL_PAYOUTS=true`. Until then, payouts are **simulated** so nothing moves by accident.
 
 Keep `TREASURY_SECRET_KEY` and any `*.keypair.json` secret — they're gitignored.

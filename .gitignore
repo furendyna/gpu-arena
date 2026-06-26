@@ -4,6 +4,7 @@ dist/
 out/
 build/
 coverage/
+*.tsbuildinfo
 
 # env / secrets — NEVER commit treasury or wallet keys
 .env

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Orbitron } from "next/font/google";
 import "./globals.css";
+import { WalletProviders } from "@/components/WalletProviders";
 
 const display = Orbitron({
   subsets: ["latin"],
@@ -18,7 +19,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={`${display.variable} text-slate-100 antialiased`}>
-        <div className="grid-overlay min-h-screen">{children}</div>
+        <WalletProviders>
+          <div className="grid-overlay min-h-screen">{children}</div>
+        </WalletProviders>
       </body>
     </html>
   );

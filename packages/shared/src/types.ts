@@ -19,8 +19,10 @@ export interface GpuInfo {
 /** A GPU owner connected to the arena. */
 export interface Competitor {
   id: string;
-  /** Solana wallet public key (base58). */
+  /** Solana wallet public key (base58) the agent signs with (identity/anti-cheat). */
   wallet: string;
+  /** Address prizes are paid to. Defaults to `wallet` if not provided. */
+  payoutWallet: string;
   handle: string;
   gpu: GpuInfo;
   tier: Tier;
@@ -85,6 +87,9 @@ export interface Battle {
 
 /** Fraction of every prize that is burned (the rest goes to the winner). */
 export const BURN_RATE = 0.25;
+
+/** Minimum prize (in tokens) required to post a bounty. */
+export const MIN_PRIZE = 50_000;
 
 /** Aggregate, arena-wide counters. */
 export interface ArenaStats {

@@ -33,11 +33,67 @@ export function verifyWalletSignature(
   }
 }
 
+/** True if `addr` is a syntactically valid base58 Solana address. */
+export function isValidSolanaAddress(addr: string): boolean {
+  try {
+    // eslint-disable-next-line no-new
+    new PublicKey(addr);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getConnection(): Connection {
   const url =
     process.env.SOLANA_RPC_URL ||
     clusterApiUrl((process.env.SOLANA_CLUSTER as any) || "mainnet-beta");
   return new Connection(url, "confirmed");
+}
+
+/** Public treasury address (from the secret key, or TREASURY_ADDRESS), or null. */
+export function getTreasuryAddress(): string | null {
+  const kp = getTreasury();
+  if (kp) return kp.publicKey.toBase58();
+  return process.env.TREASURY_ADDRESS || null;
+}
+
+/** True if the API has enough config to require + verify on-chain escrow. */
+export function escrowConfigured(): boolean {
+  return Boolean(process.env.PRIZE_TOKEN_MINT && getTreasuryAddress());
+}
+
+/**
+ * Verify that transaction `sig` deposited at least `uiAmount` of the prize token
+ * into the treasury. Uses pre/post token balances so it works for any wallet UI.
+ */
+export async function verifyEscrowTransfer(sig: string, uiAmount: number): Promise<{ ok: boolean; reason?: string }> {
+  const mintStr = process.env.PRIZE_TOKEN_MINT;
+  const treasury = getTreasuryAddress();
+  if (!mintStr || !treasury) return { ok: false, reason: "escrow not configured" };
+
+  try {
+    const connection = getConnection();
+    const tx = await connection.getParsedTransaction(sig, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    });
+    if (!tx) return { ok: false, reason: "transaction not found / not confirmed yet" };
+    if (tx.meta?.err) return { ok: false, reason: "transaction failed on-chain" };
+
+    const pre = tx.meta?.preTokenBalances ?? [];
+    const post = tx.meta?.postTokenBalances ?? [];
+    const match = (b: { owner?: string; mint?: string }) => b.owner === treasury && b.mint === mintStr;
+    const preAmt = pre.filter(match).reduce((s, b) => s + (b.uiTokenAmount.uiAmount ?? 0), 0);
+    const postAmt = post.filter(match).reduce((s, b) => s + (b.uiTokenAmount.uiAmount ?? 0), 0);
+    const received = postAmt - preAmt;
+    if (received + 1e-9 < uiAmount) {
+      return { ok: false, reason: `treasury received ${received}, expected >= ${uiAmount}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
 }
 
 function getTreasury(): Keypair | null {

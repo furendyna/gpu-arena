@@ -20,6 +20,7 @@ export interface CreateBountyInput {
   category: string;
   tier: Tier;
   prizeAmount: number;
+  escrowTxSig?: string;
 }
 
 export function createBounty(input: CreateBountyInput) {
@@ -35,6 +36,20 @@ export function listBounties() {
 
 export function getArenaState() {
   return http<ArenaState>("/api/arena/state");
+}
+
+export interface ArenaConfig {
+  cluster: string;
+  rpcUrl: string | null;
+  prizeTokenMint: string | null;
+  treasuryAddress: string | null;
+  escrowEnabled: boolean;
+  minPrize: number;
+  burnRate: number;
+}
+
+export function getConfig() {
+  return http<ArenaConfig>("/api/config");
 }
 
 export function checkHealth() {

@@ -26,6 +26,7 @@ async function runBattle(bounty: Bounty) {
   bounty.closesAt = Date.now() + BATTLE_WINDOW_MS;
   active.bountyId = bounty.id;
   active.phase = "battling";
+  await store.saveBounty(bounty);
   console.log(`[arena] battle OPEN: "${bounty.title}" (Tier ${bounty.tier}, prize ${bounty.prizeAmount})`);
   await sleep(BATTLE_WINDOW_MS);
 
@@ -33,6 +34,7 @@ async function runBattle(bounty: Bounty) {
   const subs = store.submissionsFor(bounty.id);
   if (subs.length === 0) {
     bounty.status = "cancelled";
+    await store.saveBounty(bounty);
     active.bountyId = null;
     active.phase = "idle";
     console.log(`[arena] battle CANCELLED (no submissions): "${bounty.title}"`);
@@ -41,6 +43,7 @@ async function runBattle(bounty: Bounty) {
 
   // 3) Blind judging.
   bounty.status = "judging";
+  await store.saveBounty(bounty);
   active.phase = "judging";
   await sleep(JUDGE_PAUSE_MS);
   const result = await judge(bounty.prompt, subs);
@@ -49,6 +52,7 @@ async function runBattle(bounty: Bounty) {
     if (j) {
       s.score = j.score;
       s.rationale = j.rationale;
+      await store.saveSubmission(s);
     }
   }
 
@@ -58,7 +62,7 @@ async function runBattle(bounty: Bounty) {
   // 4) Split: burn 25%, pay the winner the rest.
   const burnAmount = round6(bounty.prizeAmount * BURN_RATE);
   const payout = round6(bounty.prizeAmount - burnAmount);
-  const payRes = await payoutToWinner(winner.wallet, payout);
+  const payRes = await payoutToWinner(winner.payoutWallet, payout);
   const burnRes = await burnPrize(burnAmount);
 
   bounty.winnerSubmissionId = winnerSub.id;
@@ -67,12 +71,15 @@ async function runBattle(bounty: Bounty) {
   if (!payRes.simulated && payRes.signature) bounty.payoutTxSig = payRes.signature;
   if (!burnRes.simulated && burnRes.signature) bounty.burnTxSig = burnRes.signature;
   bounty.status = "settled";
+  await store.saveBounty(bounty);
 
   store.stats.totalPaidOut = round6(store.stats.totalPaidOut + payout);
   store.stats.totalBurned = round6(store.stats.totalBurned + burnAmount);
   store.stats.battlesCompleted += 1;
+  await store.saveStats();
   winner.points += Math.round(payout / 10);
   winner.wins += 1;
+  await store.saveCompetitor(winner);
 
   console.log(
     `[arena] battle SETTLED: "${bounty.title}" -> ${winner.gpu.model} won ${payout}, burned ${burnAmount}` +

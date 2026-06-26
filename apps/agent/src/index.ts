@@ -3,9 +3,20 @@ import type { ArenaState, Tier } from "@gpu-arena/shared";
 import { detectGpu } from "./gpu-detect.js";
 import { loadOrCreateWallet, signMessage } from "./wallet.js";
 
-const API_URL = process.env.API_URL || "http://localhost:4000";
+/** Tiny CLI flag parser: supports `--key value` and `--key=value`. */
+function arg(name: string): string | undefined {
+  const argv = process.argv.slice(2);
+  const i = argv.indexOf(`--${name}`);
+  if (i !== -1 && argv[i + 1] && !argv[i + 1].startsWith("--")) return argv[i + 1];
+  const eq = argv.find((a) => a.startsWith(`--${name}=`));
+  return eq ? eq.split("=").slice(1).join("=") : undefined;
+}
+
+const API_URL = arg("api") || process.env.API_URL || "http://localhost:4000";
 const WALLET_PATH = process.env.WALLET_PATH || "./agent.keypair.json";
-const HANDLE = process.env.HANDLE || "my-rig";
+const HANDLE = arg("handle") || process.env.HANDLE || "my-rig";
+// Address prizes are paid to. Just a public address — no private key needed.
+const PAYOUT_WALLET = arg("wallet") || process.env.PAYOUT_WALLET || undefined;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -58,7 +69,9 @@ async function main() {
 
   const detected = await detectGpu();
   const gpu = classifyGpu(detected.rawName, detected.memoryMb);
-  console.log(`[agent] wallet ${pubkey}`);
+  const payoutWallet = PAYOUT_WALLET || pubkey;
+  console.log(`[agent] signing wallet ${pubkey}`);
+  console.log(`[agent] prizes paid to ${payoutWallet}${PAYOUT_WALLET ? "" : " (this agent's wallet — pass --wallet <addr> to change)"}`);
   console.log(`[agent] GPU ${gpu.model} -> ${TIER_LABELS[gpu.tier]}`);
 
   // Register with a signed proof of wallet ownership + hardware-detected GPU.
@@ -69,6 +82,7 @@ async function main() {
     method: "POST",
     body: JSON.stringify({
       wallet: pubkey,
+      payoutWallet,
       handle: HANDLE,
       rawName: gpu.rawName,
       memoryMb: gpu.memoryMb,
