@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GITHUB_URL } from "@/lib/config";
+import { API_URL, GITHUB_URL } from "@/lib/config";
 import { Modal } from "./Modal";
 
 function Cmd({ children }: { children: string }) {
@@ -54,10 +54,11 @@ export function ConnectGpuModal({ open, onClose }: { open: boolean; onClose: () 
         </Step>
 
         <Step n={2} title="Enter the arena with your wallet">
-          <Cmd>npm run agent -- --wallet YOUR_SOLANA_ADDRESS</Cmd>
+          <Cmd>{`npm run agent -- --wallet YOUR_SOLANA_ADDRESS --api ${API_URL}`}</Cmd>
           <p className="text-[11px] text-slate-400">
-            That&apos;s it. The agent detects your real GPU, slots you into the fair tier, watches for bounties, and
-            answers them. Prizes are paid to{" "}
+            The <span className="font-mono text-slate-300">--api</span> flag points at this live arena — without it the
+            agent registers locally and won&apos;t show up here. The agent detects your real GPU, slots you into the fair
+            tier, watches for bounties, and answers them. Prizes are paid to{" "}
             <span className="text-arena-tier1">the address you pass</span> — just a public address, never a private key.
           </p>
           <p className="text-[11px] text-slate-500">
@@ -95,6 +96,24 @@ export function ConnectGpuModal({ open, onClose }: { open: boolean; onClose: () 
               <span className="font-mono">llama3.1:8b</span>)
             </li>
           </ul>
+        </div>
+
+        <div className="space-y-2 rounded-lg border border-arena-sol/25 bg-arena-sol/5 p-3 text-[11px] text-slate-300">
+          <p className="font-semibold text-arena-sol">Want to compete in image bounties too?</p>
+          <p>
+            Image battles need a local image generator. Install{" "}
+            <span className="font-mono text-arena-sol">Automatic1111</span> SD WebUI and launch it with the API on:
+          </p>
+          <Cmd>webui.bat --api</Cmd>
+          <p>
+            Then point the agent at it in <span className="font-mono text-slate-200">.env</span>:
+          </p>
+          <Cmd>IMAGE_API_URL=http://127.0.0.1:7860</Cmd>
+          <p className="text-slate-400">
+            Your agent auto-renders bigger/higher-quality images on Tier 2 cards. Without{" "}
+            <span className="font-mono">IMAGE_API_URL</span> set, the agent just skips image bounties and still competes
+            in text ones.
+          </p>
         </div>
       </div>
     </Modal>

@@ -7,9 +7,14 @@ import { payoutToWinner, burnPrize } from "./solana.js";
 // Tunables (ms). The submission window must comfortably exceed the agent poll
 // interval so every GPU in the tier has time to answer.
 const BATTLE_WINDOW_MS = Number(process.env.BATTLE_WINDOW_MS || 9000);
+// Image generation is much slower than text, so image bounties get a longer window.
+const IMAGE_BATTLE_WINDOW_MS = Number(process.env.IMAGE_BATTLE_WINDOW_MS || 120000);
 const JUDGE_PAUSE_MS = Number(process.env.JUDGE_PAUSE_MS || 1500);
 const REVEAL_MS = Number(process.env.REVEAL_MS || 6000);
 const IDLE_POLL_MS = 1000;
+
+const windowForBounty = (bounty: Bounty) =>
+  bounty.outputType === "image" ? IMAGE_BATTLE_WINDOW_MS : BATTLE_WINDOW_MS;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
@@ -22,13 +27,16 @@ const active: { bountyId: string | null; phase: ArenaPhase } = {
 
 async function runBattle(bounty: Bounty) {
   // 1) Open for submissions from GPUs in this tier.
+  const battleWindow = windowForBounty(bounty);
   bounty.status = "battling";
-  bounty.closesAt = Date.now() + BATTLE_WINDOW_MS;
+  bounty.closesAt = Date.now() + battleWindow;
   active.bountyId = bounty.id;
   active.phase = "battling";
   await store.saveBounty(bounty);
-  console.log(`[arena] battle OPEN: "${bounty.title}" (Tier ${bounty.tier}, prize ${bounty.prizeAmount})`);
-  await sleep(BATTLE_WINDOW_MS);
+  console.log(
+    `[arena] battle OPEN: "${bounty.title}" (Tier ${bounty.tier}, ${bounty.outputType ?? "text"}, prize ${bounty.prizeAmount})`,
+  );
+  await sleep(battleWindow);
 
   // 2) No one answered -> cancel and move on.
   const subs = store.submissionsFor(bounty.id);
@@ -46,7 +54,7 @@ async function runBattle(bounty: Bounty) {
   await store.saveBounty(bounty);
   active.phase = "judging";
   await sleep(JUDGE_PAUSE_MS);
-  const result = await judge(bounty.prompt, subs);
+  const result = await judge(bounty.prompt, subs, bounty.outputType ?? "text");
   for (const s of subs) {
     const j = result.scores[s.id];
     if (j) {

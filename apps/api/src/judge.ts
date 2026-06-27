@@ -1,4 +1,4 @@
-import type { Submission } from "@gpu-arena/shared";
+import type { OutputType, Submission } from "@gpu-arena/shared";
 
 export interface JudgedResult {
   scores: Record<string, { score: number; rationale: string }>;
@@ -9,12 +9,26 @@ export interface JudgedResult {
  * Blind AI judge. Answers are scored WITHOUT any GPU/competitor identity attached,
  * so a powerful card gets no advantage — only answer quality matters.
  *
- * Primary judge is a local Ollama model. If Ollama is unreachable/errors, it
- * falls back to a deterministic offline heuristic so battles never get stuck.
+ * Primary judge is a local Ollama model (text LLM for text bounties, a vision
+ * model for image bounties). If Ollama is unreachable/errors, it falls back to a
+ * deterministic offline heuristic so battles never get stuck.
  */
-export async function judge(prompt: string, submissions: Submission[]): Promise<JudgedResult> {
+export async function judge(
+  prompt: string,
+  submissions: Submission[],
+  outputType: OutputType = "text",
+): Promise<JudgedResult> {
   if (submissions.length === 0) {
     throw new Error("no submissions to judge");
+  }
+
+  if (outputType === "image") {
+    try {
+      return await judgeImagesWithOllama(prompt, submissions);
+    } catch (err) {
+      console.warn("[judge] Ollama vision judge failed, falling back:", err);
+      return imageFallbackJudge(submissions);
+    }
   }
 
   try {
@@ -71,6 +85,71 @@ async function judgeWithOllama(prompt: string, submissions: Submission[]): Promi
     if (scores[sub.id].score > best.score) best = { id: sub.id, score: scores[sub.id].score };
   }
   if (Object.keys(scores).length === 0) throw new Error("Ollama returned no usable scores");
+  return { scores, winnerSubmissionId: best.id };
+}
+
+/**
+ * Score generated images with an Ollama vision model. Each image is scored
+ * independently (0-100) for how well it matches the prompt — identity-blind.
+ */
+async function judgeImagesWithOllama(prompt: string, submissions: Submission[]): Promise<JudgedResult> {
+  const baseUrl = (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, "");
+  const model = process.env.VISION_JUDGE_MODEL || "llama3.2-vision";
+
+  const scores: JudgedResult["scores"] = {};
+  let best = { id: submissions[0].id, score: -1 };
+  let scored = 0;
+
+  for (const s of submissions) {
+    if (!s.imageBase64) {
+      scores[s.id] = { score: 0, rationale: "no image submitted" };
+      continue;
+    }
+    const sys =
+      "You are an impartial judge in an image-generation competition. Score the image 0-100 for how well it matches the prompt, plus quality and coherence. Respond ONLY with strict JSON: {\"score\":87,\"rationale\":\"...\"}.";
+    const res = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        format: "json",
+        options: { temperature: 0 },
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: `Prompt: ${prompt}`, images: [s.imageBase64] },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
+    const data = (await res.json()) as { message?: { content?: string } };
+    const content = data.message?.content;
+    if (!content) throw new Error("Ollama vision returned no content");
+    const parsed = JSON.parse(content) as { score: number; rationale?: string };
+    scores[s.id] = { score: clamp(parsed.score), rationale: parsed.rationale ?? "" };
+    scored += 1;
+    if (scores[s.id].score > best.score) best = { id: s.id, score: scores[s.id].score };
+  }
+
+  if (scored === 0) throw new Error("no images to judge");
+  return { scores, winnerSubmissionId: best.id };
+}
+
+/** Fallback when no vision model is available: reward submitting an image fast. */
+function imageFallbackJudge(submissions: Submission[]): JudgedResult {
+  const scores: JudgedResult["scores"] = {};
+  let best = { id: submissions[0].id, score: -1 };
+  for (const s of submissions) {
+    const has = Boolean(s.imageBase64);
+    // Faster valid submissions edge ahead; capped so it stays a tie-ish race.
+    const speedBonus = has ? Math.max(0, 20 - Math.min(20, s.latencyMs / 3000)) : 0;
+    const score = has ? clamp(60 + speedBonus) : 0;
+    scores[s.id] = {
+      score,
+      rationale: has ? "image submitted (offline scoring)" : "no image submitted",
+    };
+    if (score > best.score) best = { id: s.id, score };
+  }
   return { scores, winnerSubmissionId: best.id };
 }
 

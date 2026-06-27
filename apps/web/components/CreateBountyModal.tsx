@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Tier } from "@gpu-arena/shared";
+import type { OutputType, Tier } from "@gpu-arena/shared";
 import { BURN_RATE, MIN_PRIZE } from "@gpu-arena/shared";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, Transaction } from "@solana/web3.js";
@@ -29,6 +29,7 @@ export function CreateBountyModal({ open, onClose }: { open: boolean; onClose: (
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [category, setCategory] = useState("Technology");
+  const [outputType, setOutputType] = useState<OutputType>("text");
   const [tier, setTier] = useState<Tier>(2);
   const [prize, setPrize] = useState(MIN_PRIZE);
   const [state, setState] = useState<State>("idle");
@@ -117,6 +118,7 @@ export function CreateBountyModal({ open, onClose }: { open: boolean; onClose: (
         prompt,
         category,
         tier,
+        outputType,
         prizeAmount: Number(prize),
         escrowTxSig,
       });
@@ -177,6 +179,34 @@ export function CreateBountyModal({ open, onClose }: { open: boolean; onClose: (
               <input type="number" min={MIN_PRIZE} step={1000} className={field} value={prize} onChange={(e) => setPrize(Number(e.target.value))} required />
             </div>
           </div>
+          <div>
+            <label className={label}>Output</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(["text", "image"] as OutputType[]).map((o) => (
+                <button
+                  type="button"
+                  key={o}
+                  onClick={() => setOutputType(o)}
+                  className={`clip-card border px-3 py-2 text-sm transition ${
+                    outputType === o
+                      ? "border-arena-sol text-arena-sol shadow-neon-gold"
+                      : "border-white/10 text-slate-400 hover:border-white/30"
+                  }`}
+                >
+                  {o === "text" ? "Text answer" : "Generated image"}
+                  <div className="text-[10px] text-slate-500">
+                    {o === "text" ? "GPUs write the best answer" : "GPUs render an image (SD/FLUX)"}
+                  </div>
+                </button>
+              ))}
+            </div>
+            {outputType === "image" && (
+              <p className="mt-1 text-[10px] text-arena-gold">
+                Image battles run longer and need GPUs with an image backend connected.
+              </p>
+            )}
+          </div>
+
           <div>
             <label className={label}>Pool / Tier</label>
             <div className="grid grid-cols-2 gap-2">

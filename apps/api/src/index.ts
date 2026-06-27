@@ -81,7 +81,7 @@ app.get("/api/bounties", (_req, res) => {
 });
 
 app.post("/api/bounties", async (req, res) => {
-  const { creatorWallet, title, prompt, category, tier, prizeAmount, prizeMint, closesAt, escrowTxSig } =
+  const { creatorWallet, title, prompt, category, tier, prizeAmount, prizeMint, closesAt, escrowTxSig, outputType } =
     req.body ?? {};
   if (!creatorWallet || !title || !prompt || !prizeAmount) {
     return res.status(400).json({ error: "creatorWallet, title, prompt, prizeAmount required" });
@@ -106,6 +106,7 @@ app.post("/api/bounties", async (req, res) => {
     prompt,
     category: category || "General",
     tier: (tier as Tier) || 1,
+    outputType: outputType === "image" ? "image" : "text",
     prizeAmount: Number(prizeAmount),
     prizeMint: prizeMint || process.env.PRIZE_TOKEN_MINT || "",
     closesAt: closesAt || Date.now() + 1000 * 60 * 60,
@@ -133,7 +134,7 @@ app.post("/api/bounties/:id/submit", async (req, res) => {
   if (!activeBountyIsAcceptingSubmissions(bounty.id)) {
     return res.status(409).json({ error: "bounty is not accepting submissions right now" });
   }
-  const { wallet, answer, latencyMs } = req.body ?? {};
+  const { wallet, answer, imageBase64, latencyMs } = req.body ?? {};
   const competitor = wallet ? store.competitorByWallet(wallet) : undefined;
   if (!competitor) return res.status(401).json({ error: "competitor not registered" });
   if (competitor.tier !== bounty.tier) {
@@ -143,10 +144,17 @@ app.post("/api/bounties/:id/submit", async (req, res) => {
   const existing = store.submissionsFor(bounty.id).find((s) => s.competitorId === competitor.id);
   if (existing) return res.json({ submission: existing });
 
+  // Strip any data: URL prefix so we store raw base64 (vision judge expects raw).
+  const rawImage =
+    typeof imageBase64 === "string" && imageBase64.length > 0
+      ? imageBase64.replace(/^data:image\/[a-z]+;base64,/, "")
+      : undefined;
+
   const submission = await store.addSubmission({
     bountyId: bounty.id,
     competitorId: competitor.id,
     answer: String(answer ?? ""),
+    imageBase64: rawImage,
     latencyMs: Number(latencyMs ?? 0),
   });
   res.json({ submission });

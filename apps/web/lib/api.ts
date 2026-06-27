@@ -1,4 +1,4 @@
-import type { ArenaState, Bounty, Tier } from "@gpu-arena/shared";
+import type { ArenaState, Bounty, OutputType, Tier } from "@gpu-arena/shared";
 import { API_URL } from "./config";
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
@@ -19,6 +19,7 @@ export interface CreateBountyInput {
   prompt: string;
   category: string;
   tier: Tier;
+  outputType: OutputType;
   prizeAmount: number;
   escrowTxSig?: string;
 }

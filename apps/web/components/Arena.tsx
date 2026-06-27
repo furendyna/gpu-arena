@@ -309,9 +309,16 @@ function BattleStage({
             <div className="font-display text-xs tracking-[0.4em] text-arena-gold">WINNER</div>
             <div className="mt-2 font-display text-3xl font-black text-arena-gold drop-shadow">{winner.gpu.model}</div>
             <div className="text-sm text-slate-300">@{winner.handle}</div>
-            {winnerSub && (
+            {winnerSub?.imageBase64 ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`data:image/png;base64,${winnerSub.imageBase64}`}
+                alt="Winning generated image"
+                className="mx-auto mt-4 max-h-72 w-auto rounded-lg border border-arena-gold/40"
+              />
+            ) : winnerSub ? (
               <div className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-slate-200">“{winnerSub.answer}”</div>
-            )}
+            ) : null}
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-sm">
               <span className="rounded-full bg-arena-sol/15 px-4 py-1.5 font-semibold text-arena-sol">
                 +{(active?.bounty.winnerPayout ?? 0).toLocaleString()} $ARENA to winner
@@ -366,7 +373,14 @@ function BattleStage({
                         <span className="text-arena-gold">{Math.round(sub.score)}</span>
                       )}
                     </div>
-                    {sub ? (
+                    {sub?.imageBase64 ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`data:image/png;base64,${sub.imageBase64}`}
+                        alt="Generated submission"
+                        className="mt-1 max-h-40 w-full rounded object-cover"
+                      />
+                    ) : sub ? (
                       sub.answer
                     ) : (
                       <span className="text-slate-500">

@@ -63,6 +63,52 @@ async function generateAnswer(
   return { answer, latencyMs: Date.now() - start };
 }
 
+/** Optional per-tier image checkpoint override for Automatic1111. */
+function imageModelForTier(tier: Tier): string | undefined {
+  return tier === 1
+    ? process.env.IMAGE_MODEL_TIER1 || undefined
+    : process.env.IMAGE_MODEL_TIER2 || undefined;
+}
+
+/**
+ * Generate an image with a local Automatic1111 SD WebUI (started with --api).
+ * Returns raw base64 PNG. Tier 2 renders larger / more steps for higher quality.
+ */
+async function generateImage(
+  prompt: string,
+  tier: Tier,
+): Promise<{ imageBase64: string; latencyMs: number }> {
+  const start = Date.now();
+  const url = process.env.IMAGE_API_URL;
+  if (!url) {
+    throw new Error("IMAGE_API_URL not set — cannot compete in image bounties");
+  }
+  const base = url.replace(/\/$/, "");
+  const size = tier === 1 ? 512 : 768;
+  const steps = tier === 1 ? 12 : 28;
+  const checkpoint = imageModelForTier(tier);
+
+  const res = await fetch(`${base}/sdapi/v1/txt2img`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt,
+      steps,
+      width: size,
+      height: size,
+      cfg_scale: 7,
+      ...(checkpoint ? { override_settings: { sd_model_checkpoint: checkpoint } } : {}),
+    }),
+  });
+  if (!res.ok) throw new Error(`txt2img ${res.status}: ${await res.text()}`);
+  const data = (await res.json()) as { images?: string[] };
+  const image = data.images?.[0];
+  if (!image) throw new Error("txt2img returned no image");
+  // A1111 sometimes prefixes a data URL; store raw base64.
+  const imageBase64 = image.replace(/^data:image\/[a-z]+;base64,/, "");
+  return { imageBase64, latencyMs: Date.now() - start };
+}
+
 async function main() {
   const wallet = loadOrCreateWallet(WALLET_PATH);
   const pubkey = wallet.publicKey.toBase58();
@@ -101,15 +147,33 @@ async function main() {
       // Only the active battle in my tier accepts answers, and only once.
       if (battle && state.phase === "battling" && battle.bounty.tier === gpu.tier && !seen.has(battle.bounty.id)) {
         seen.add(battle.bounty.id);
-        console.log(
-          `[agent] battling "${battle.bounty.title}" (${battle.bounty.prizeAmount} prize) using ${modelForTier(gpu.tier)}`,
-        );
-        const { answer, latencyMs } = await generateAnswer(battle.bounty.prompt, gpu.tier);
-        await api(`/api/bounties/${battle.bounty.id}/submit`, {
-          method: "POST",
-          body: JSON.stringify({ wallet: pubkey, answer, latencyMs }),
-        });
-        console.log(`[agent] submitted answer in ${latencyMs}ms`);
+        const isImage = battle.bounty.outputType === "image";
+        try {
+          if (isImage) {
+            console.log(
+              `[agent] battling "${battle.bounty.title}" (${battle.bounty.prizeAmount} prize) — generating image`,
+            );
+            const { imageBase64, latencyMs } = await generateImage(battle.bounty.prompt, gpu.tier);
+            await api(`/api/bounties/${battle.bounty.id}/submit`, {
+              method: "POST",
+              body: JSON.stringify({ wallet: pubkey, answer: "", imageBase64, latencyMs }),
+            });
+            console.log(`[agent] submitted image in ${latencyMs}ms`);
+          } else {
+            console.log(
+              `[agent] battling "${battle.bounty.title}" (${battle.bounty.prizeAmount} prize) using ${modelForTier(gpu.tier)}`,
+            );
+            const { answer, latencyMs } = await generateAnswer(battle.bounty.prompt, gpu.tier);
+            await api(`/api/bounties/${battle.bounty.id}/submit`, {
+              method: "POST",
+              body: JSON.stringify({ wallet: pubkey, answer, latencyMs }),
+            });
+            console.log(`[agent] submitted answer in ${latencyMs}ms`);
+          }
+        } catch (err) {
+          // Don't get stuck on this bounty if generation failed (e.g. no image backend).
+          console.warn(`[agent] could not compete in "${battle.bounty.title}":`, (err as Error).message);
+        }
       }
     } catch (err) {
       console.warn("[agent] poll error:", (err as Error).message);

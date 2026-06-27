@@ -29,6 +29,8 @@ export interface Competitor {
     wins: number;
 }
 export type BountyStatus = "open" | "battling" | "judging" | "settled" | "cancelled";
+/** What GPUs must produce for a bounty: a text answer or a generated image. */
+export type OutputType = "text" | "image";
 /** A task/prompt with a token prize that GPUs compete over. */
 export interface Bounty {
     id: string;
@@ -37,6 +39,8 @@ export interface Bounty {
     prompt: string;
     category: string;
     tier: Tier;
+    /** What competitors produce. Defaults to "text" for older bounties. */
+    outputType?: OutputType;
     /** Prize in base units of the SPL token. */
     prizeAmount: number;
     prizeMint: string;
@@ -61,8 +65,10 @@ export interface Submission {
     id: string;
     bountyId: string;
     competitorId: string;
-    /** The produced answer text. */
+    /** The produced answer text (empty for image bounties). */
     answer: string;
+    /** Base64-encoded PNG for image bounties (no data: prefix). */
+    imageBase64?: string;
     /** ms the GPU took to produce the answer. */
     latencyMs: number;
     createdAt: number;
